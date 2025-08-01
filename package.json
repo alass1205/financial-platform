@@ -1,0 +1,19 @@
+{
+  "name": "financial-platform",
+  "version": "1.0.0",
+  "description": "Blockchain Financial Platform with TRG stablecoin",
+  "main": "index.js",
+  "scripts": {
+    "blockchain": "npx hardhat node",
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "test:trg": "npx hardhat test test/TriangleCoin.js",
+    "test:verbose": "npx hardhat test --verbose",
+    "deploy:trg": "npx hardhat run scripts/deploy-trg.js --network localhost",
+    "clean": "npx hardhat clean",
+    "setup": "npm install && npm run compile"
+  },
+  "keywords": ["blockchain", "defi", "stablecoin", "hardhat", "solidity"],
+  "author": "Alassall",
+  "license": "MIT"
+}

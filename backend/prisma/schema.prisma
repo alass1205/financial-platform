@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  address   String   @unique // Adresse Ethereum (principal identifiant)
+  email     String?  @unique
+  name      String
+  passportImage String? // Chemin vers l'image passeport
+  isVerified Boolean @default(false) // Vérification du passeport
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastLogin DateTime?
+  
+  // Données KYC (Know Your Customer)
+  firstName String?
+  lastName  String?
+  country   String?
+  dateOfBirth DateTime?
+  
+  // Relations
+  orders    Order[]
+  buyTrades Trade[] @relation("BuyerTrades")
+  sellTrades Trade[] @relation("SellerTrades")
+  balances  Balance[]
+  sessions  UserSession[]
+  
+  @@map("users")
+}
+
+model UserSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  isActive  Boolean  @default(true)
+  userAgent String?
+  ipAddress String?
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_sessions")
+}
+
+model Asset {
+  id        String   @id @default(cuid())
+  symbol    String   @unique // TRG, CLV, ROO, GOV
+  name      String
+  contractAddress String @unique
+  type      AssetType
+  decimals  Int      @default(18)
+  isActive  Boolean  @default(true)
+  minOrderSize String @default("1") // Taille minimum d'ordre
+  maxOrderSize String? // Taille maximum d'ordre
+  createdAt DateTime @default(now())
+  
+  // Relations
+  orders    Order[]
+  trades    Trade[]
+  balances  Balance[]
+  priceHistory PriceHistory[]
+  
+  @@map("assets")
+}
+
+model Balance {
+  id         String  @id @default(cuid())
+  userId     String
+  assetId    String
+  available  String  // Solde disponible (en wei)
+  reserved   String  @default("0") // Solde réservé pour ordres
+  total      String  // Total = available + reserved
+  updatedAt  DateTime @updatedAt
+  lastSyncBlock BigInt? // Dernier block synchronisé
+  
+  // Relations
+  user       User    @relation(fields: [userId], references: [id])
+  asset      Asset   @relation(fields: [assetId], references: [id])
+  
+  @@unique([userId, assetId])
+  @@map("balances")
+}
+
+model Order {
+  id          String     @id @default(cuid())
+  userId      String
+  assetId     String
+  type        OrderType  // BUY or SELL
+  price       String     // Prix en TRG (en wei)
+  quantity    String     // Quantité (en wei)
+  filled      String     @default("0") // Quantité exécutée
+  remaining   String     // Quantité restante
+  status      OrderStatus @default(OPEN)
+  expiresAt   DateTime?  // Expiration de l'ordre
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  user        User       @relation(fields: [userId], references: [id])
+  asset       Asset      @relation(fields: [assetId], references: [id])
+  buyTrades   Trade[]    @relation("BuyOrderTrades")
+  sellTrades  Trade[]    @relation("SellOrderTrades")
+  
+  @@map("orders")
+}
+
+model Trade {
+  id         String   @id @default(cuid())
+  buyOrderId String
+  sellOrderId String
+  buyerId    String
+  sellerId   String
+  assetId    String
+  price      String   // Prix d'exécution (en wei TRG)
+  quantity   String   // Quantité échangée (en wei)
+  fee        String   @default("0") // Frais de transaction
+  executedAt DateTime @default(now())
+  blockNumber BigInt?  // Block de la transaction
+  txHash     String?   // Hash de transaction
+  
+  // Relations avec noms explicites
+  buyOrder   Order    @relation("BuyOrderTrades", fields: [buyOrderId], references: [id])
+  sellOrder  Order    @relation("SellOrderTrades", fields: [sellOrderId], references: [id])
+  buyer      User     @relation("BuyerTrades", fields: [buyerId], references: [id])
+  seller     User     @relation("SellerTrades", fields: [sellerId], references: [id])
+  asset      Asset    @relation(fields: [assetId], references: [id])
+  
+  @@map("trades")
+}
+
+model PriceHistory {
+  id        String   @id @default(cuid())
+  assetId   String
+  price     String   // Prix en TRG (en wei)
+  volume    String   // Volume échangé
+  high      String   // Plus haut
+  low       String   // Plus bas
+  open      String   // Prix d'ouverture
+  close     String   // Prix de fermeture
+  timestamp DateTime @default(now())
+  interval  String   @default("1h") // 1m, 5m, 1h, 1d
+  
+  // Relations
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  
+  @@unique([assetId, timestamp, interval])
+  @@map("price_history")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum AssetType {
+  STABLECOIN
+  SHARE
+  BOND
+}
+
+enum OrderType {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+}

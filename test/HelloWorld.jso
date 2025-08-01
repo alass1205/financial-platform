@@ -1,0 +1,28 @@
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
+
+describe("HelloWorld", function () {
+  let helloWorld;
+  let owner;
+  
+  beforeEach(async function () {
+    [owner] = await ethers.getSigners();
+    const HelloWorld = await ethers.getContractFactory("HelloWorld");
+    helloWorld = await HelloWorld.deploy();
+    // CHANGEMENT ICI : plus besoin de .deployed()
+    await helloWorld.waitForDeployment();
+  });
+
+  it("Should deploy with correct initial message", async function () {
+    expect(await helloWorld.getMessage()).to.equal("Hello Financial Platform!");
+  });
+
+  it("Should allow owner to change message", async function () {
+    await helloWorld.setMessage("New message!");
+    expect(await helloWorld.getMessage()).to.equal("New message!");
+  });
+
+  it("Should set the right owner", async function () {
+    expect(await helloWorld.owner()).to.equal(owner.address);
+  });
+});
