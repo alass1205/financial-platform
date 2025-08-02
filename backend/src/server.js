@@ -4,8 +4,10 @@ const cors = require('cors');
 const path = require('path');
 const web3Service = require('./services/web3Service');
 const eventService = require('./services/eventService');
+const tradingService = require('./services/tradingService');
 const apiRoutes = require('./routes/apiRoutes');
 const authRoutes = require('./routes/authRoutes');
+const tradingRoutes = require("./routes/tradingRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,6 +23,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Variables d'état
 let isWeb3Ready = false;
 let areEventsReady = false;
+let isTradingReady = false;
 
 // Routes de base
 app.get('/health', (req, res) => {
@@ -32,6 +35,7 @@ app.get('/health', (req, res) => {
     services: {
       web3Ready: isWeb3Ready,
       eventsReady: areEventsReady,
+      tradingReady: isTradingReady,
       authentication: true,
       uptime: process.uptime()
     }
@@ -61,7 +65,9 @@ app.get('/api/test-db', async (req, res) => {
 
 // Routes principales
 app.use('/api/auth', authRoutes);
+app.use("/api/trading", tradingRoutes);
 app.use('/api', apiRoutes);
+
 
 // Routes legacy (compatibilité)
 app.get('/api/web3/status', async (req, res) => {
@@ -135,13 +141,9 @@ app.use('*', (req, res) => {
     availableRoutes: [
       'GET /health',
       'POST /api/auth/login',
-      'POST /api/auth/logout',
-      'GET /api/auth/me',
-      'PUT /api/auth/profile',
-      'POST /api/auth/upload-passport',
+      'GET /api/trading/status',
       'GET /api/status',
-      'GET /api/tokens',
-      'GET /api/balance/:address'
+      'GET /api/tokens'
     ],
     timestamp: new Date().toISOString()
   });
@@ -164,17 +166,21 @@ async function startServer() {
     areEventsReady = true;
     console.log('✅ Event listeners ready');
     
+    // Initialiser le trading service
+    console.log('⏳ Initializing Trading service...');
+    await tradingService.initialize();
+    isTradingReady = true;
+    console.log('✅ Trading service ready');
+    
     // Démarrer le serveur
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
       console.log(`🔗 API ENDPOINTS:`);
       console.log(`   Health: http://localhost:${PORT}/health`);
-      console.log(`   Auth Login: POST http://localhost:${PORT}/api/auth/login`);
-      console.log(`   Auth Me: GET http://localhost:${PORT}/api/auth/me`);
+      console.log(`   Trading: http://localhost:${PORT}/api/trading/status`);
+      console.log(`   Auth: http://localhost:${PORT}/api/auth/login`);
       console.log(`   Status: http://localhost:${PORT}/api/status`);
-      console.log(`   Tokens: http://localhost:${PORT}/api/tokens`);
-      console.log(`   Balance: http://localhost:${PORT}/api/balance/ADDRESS`);
       console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     });
     

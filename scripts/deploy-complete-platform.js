@@ -186,3 +186,195 @@ main()
     console.error("❌ Erreur:", error);
     process.exit(1);
   });
+
+  // ============================================================================
+  // 🔄 AUTO-SYNC BACKEND APRÈS DÉPLOIEMENT
+  // ============================================================================
+  
+  console.log("\n🔄 PHASE 5: AUTO-SYNCHRONISATION BACKEND");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 1. Mettre à jour le fichier .env du backend
+    console.log("⏳ Mise à jour du fichier .env backend...");
+    
+    const envPath = path.join(__dirname, '../backend/.env');
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    
+    // Remplacer les adresses dans le .env
+    envContent = envContent.replace(/TRG_CONTRACT=".*"/, `TRG_CONTRACT="${trgAddress}"`);
+    envContent = envContent.replace(/CLV_CONTRACT=".*"/, `CLV_CONTRACT="${clvAddress}"`);
+    envContent = envContent.replace(/ROO_CONTRACT=".*"/, `ROO_CONTRACT="${rooAddress}"`);
+    envContent = envContent.replace(/GOV_CONTRACT=".*"/, `GOV_CONTRACT="${govAddress}"`);
+    
+    fs.writeFileSync(envPath, envContent);
+    console.log("✅ Fichier .env backend mis à jour");
+    
+    // 2. Mettre à jour la base de données si le backend existe
+    console.log("⏳ Mise à jour de la base de données backend...");
+    
+    try {
+      const { execSync } = require('child_process');
+      
+      // Créer un script temporaire pour mettre à jour la DB
+      const updateScript = `
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+
+async function updateContractAddresses() {
+  try {
+    const addresses = {
+      'TRG': '${trgAddress}',
+      'CLV': '${clvAddress}', 
+      'ROO': '${rooAddress}',
+      'GOV': '${govAddress}'
+    };
+
+    for (const [symbol, address] of Object.entries(addresses)) {
+      await prisma.asset.upsert({
+        where: { symbol },
+        update: { contractAddress: address },
+        create: {
+          symbol,
+          name: symbol === 'TRG' ? 'Triangle Coin' : 
+                symbol === 'CLV' ? 'Clove Company' :
+                symbol === 'ROO' ? 'Rooibos Limited' : 'Government Bonds',
+          contractAddress: address,
+          type: symbol === 'TRG' ? 'STABLECOIN' : 
+                symbol === 'GOV' ? 'BOND' : 'SHARE'
+        }
+      });
+    }
+    
+    console.log('✅ DB contracts updated successfully');
+    await prisma.$disconnect();
+  } catch (error) {
+    console.log('⚠️  DB update skipped (backend not ready)');
+    await prisma.$disconnect();
+  }
+}
+
+updateContractAddresses();
+`;
+      
+      fs.writeFileSync('../backend/temp-update-contracts.js', updateScript);
+      
+      // Exécuter la mise à jour de la DB
+      execSync('cd ../backend && node temp-update-contracts.js', { stdio: 'inherit' });
+      
+      // Nettoyer le fichier temporaire
+      fs.unlinkSync('../backend/temp-update-contracts.js');
+      
+      console.log("✅ Base de données backend mise à jour");
+      
+    } catch (error) {
+      console.log("⚠️  Mise à jour DB ignorée (backend non configuré)");
+    }
+    
+    console.log("\n🎉 AUTO-SYNCHRONISATION TERMINÉE !");
+    console.log("✅ Le backend est maintenant synchronisé avec les nouveaux contrats");
+    console.log("✅ Vous pouvez redémarrer le serveur backend sans configuration manuelle");
+    
+  } catch (error) {
+    console.log("⚠️  Auto-sync partielle:", error.message);
+    console.log("💡 Vous devrez peut-être synchroniser manuellement");
+  }
+
+  // ============================================================================
+  // 🔄 AUTO-SYNC BACKEND APRÈS DÉPLOIEMENT
+  // ============================================================================
+  
+  console.log("\n🔄 PHASE 5: AUTO-SYNCHRONISATION BACKEND");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 1. Mettre à jour le fichier .env du backend
+    console.log("⏳ Mise à jour du fichier .env backend...");
+    
+    const envPath = path.join(__dirname, '../backend/.env');
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    
+    // Remplacer les adresses dans le .env
+    envContent = envContent.replace(/TRG_CONTRACT=".*"/, `TRG_CONTRACT="${trgAddress}"`);
+    envContent = envContent.replace(/CLV_CONTRACT=".*"/, `CLV_CONTRACT="${clvAddress}"`);
+    envContent = envContent.replace(/ROO_CONTRACT=".*"/, `ROO_CONTRACT="${rooAddress}"`);
+    envContent = envContent.replace(/GOV_CONTRACT=".*"/, `GOV_CONTRACT="${govAddress}"`);
+    
+    fs.writeFileSync(envPath, envContent);
+    console.log("✅ Fichier .env backend mis à jour");
+    
+    // 2. Mettre à jour la base de données si le backend existe
+    console.log("⏳ Mise à jour de la base de données backend...");
+    
+    try {
+      const { execSync } = require('child_process');
+      
+      // Créer un script temporaire pour mettre à jour la DB
+      const updateScript = `
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+
+async function updateContractAddresses() {
+  try {
+    const addresses = {
+      'TRG': '${trgAddress}',
+      'CLV': '${clvAddress}', 
+      'ROO': '${rooAddress}',
+      'GOV': '${govAddress}'
+    };
+
+    for (const [symbol, address] of Object.entries(addresses)) {
+      await prisma.asset.upsert({
+        where: { symbol },
+        update: { contractAddress: address },
+        create: {
+          symbol,
+          name: symbol === 'TRG' ? 'Triangle Coin' : 
+                symbol === 'CLV' ? 'Clove Company' :
+                symbol === 'ROO' ? 'Rooibos Limited' : 'Government Bonds',
+          contractAddress: address,
+          type: symbol === 'TRG' ? 'STABLECOIN' : 
+                symbol === 'GOV' ? 'BOND' : 'SHARE'
+        }
+      });
+    }
+    
+    console.log('✅ DB contracts updated successfully');
+    await prisma.$disconnect();
+  } catch (error) {
+    console.log('⚠️  DB update skipped (backend not ready)');
+    await prisma.$disconnect();
+  }
+}
+
+updateContractAddresses();
+`;
+      
+      fs.writeFileSync('../backend/temp-update-contracts.js', updateScript);
+      
+      // Exécuter la mise à jour de la DB
+      execSync('cd ../backend && node temp-update-contracts.js', { stdio: 'inherit' });
+      
+      // Nettoyer le fichier temporaire
+      fs.unlinkSync('../backend/temp-update-contracts.js');
+      
+      console.log("✅ Base de données backend mise à jour");
+      
+    } catch (error) {
+      console.log("⚠️  Mise à jour DB ignorée (backend non configuré)");
+    }
+    
+    console.log("\n🎉 AUTO-SYNCHRONISATION TERMINÉE !");
+    console.log("✅ Le backend est maintenant synchronisé avec les nouveaux contrats");
+    console.log("✅ Vous pouvez redémarrer le serveur backend sans configuration manuelle");
+    
+  } catch (error) {
+    console.log("⚠️  Auto-sync partielle:", error.message);
+    console.log("💡 Vous devrez peut-être synchroniser manuellement");
+  }
