@@ -1,0 +1,50 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Variables CSS personnalisées */
+:root {
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+/* Styles de base */
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #f8fafc;
+}
+
+/* Classes utilitaires personnalisées */
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary-500 to-primary-600 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:shadow-medium hover:-translate-y-0.5;
+  }
+  
+  .btn-secondary {
+    @apply bg-white border border-gray-200 text-gray-700 px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:bg-gray-50 hover:shadow-soft;
+  }
+  
+  .card {
+    @apply bg-white rounded-2xl shadow-soft border border-gray-100 p-6;
+  }
+  
+  .card-hover {
+    @apply card transition-all duration-200 hover:shadow-medium hover:-translate-y-1;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
+  }
+}
+
+/* Animations personnalisées */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
