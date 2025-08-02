@@ -1,3 +1,4 @@
+// frontend/src/hooks/useTrading.js
 import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '../context/WalletContext'
 import apiService from '../services/apiService'
@@ -37,7 +38,7 @@ export function useTrading() {
     autoLogin()
   }, [isConnected, account, isLoggedIn])
 
-  // Créer un ordre
+  // 🔧 CORRECTION - Créer un ordre avec les bonnes données
   const createOrder = useCallback(async (orderData) => {
     if (!isLoggedIn) {
       throw new Error('Vous devez être connecté pour trader')
@@ -47,10 +48,21 @@ export function useTrading() {
     setError(null)
 
     try {
-      const result = await apiService.createOrder({
-        ...orderData,
-        userAddress: account
-      })
+      console.log('🔧 OrderData reçu:', orderData)
+      
+      // TRANSFORMATION DES DONNÉES POUR LE BACKEND
+      const [baseToken] = orderData.pair.split('/')
+      
+      const backendData = {
+        assetSymbol: baseToken,        // CLV au lieu de CLV/TRG
+        type: orderData.type,          // BUY ou SELL
+        price: orderData.price,        // Numérique
+        quantity: orderData.quantity   // Numérique
+      }
+      
+      console.log('📦 Données envoyées au backend:', backendData)
+      
+      const result = await apiService.createOrder(backendData)
       
       // Recharger les ordres après création
       await loadOrders()
