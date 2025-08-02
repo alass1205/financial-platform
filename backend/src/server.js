@@ -6,6 +6,7 @@ const web3Service = require('./services/web3Service');
 const eventService = require('./services/eventService');
 const tradingService = require('./services/tradingService');
 const apiRoutes = require('./routes/apiRoutes');
+const portfolioRoutes = require('./routes/portfolioRoutes');
 const authRoutes = require('./routes/authRoutes');
 const tradingRoutes = require("./routes/tradingRoutes");
 
@@ -67,6 +68,7 @@ app.get('/api/test-db', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use("/api/trading", tradingRoutes);
 app.use('/api', apiRoutes);
+app.use('/api/portfolio', portfolioRoutes);
 
 
 // Routes legacy (compatibilité)

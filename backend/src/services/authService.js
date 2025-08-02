@@ -1,76 +1,164 @@
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
+const { ethers } = require('ethers');
 
 const prisma = new PrismaClient();
 
 class AuthService {
-  constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-    this.jwtExpire = process.env.JWT_EXPIRE || '24h';
-  }
-
-  // Générer un token JWT
-  generateToken(userId, address) {
-    return jwt.sign(
-      { 
-        userId, 
-        address,
-        timestamp: Date.now()
-      }, 
-      this.jwtSecret, 
-      { expiresIn: this.jwtExpire }
-    );
-  }
-
-  // Vérifier un token JWT
-  verifyToken(token) {
+  // Valider une adresse Ethereum
+  isValidAddress(address) {
     try {
-      return jwt.verify(token, this.jwtSecret);
+      return ethers.isAddress(address);
     } catch (error) {
-      throw new Error('Invalid or expired token');
+      return false;
     }
   }
 
-  // Créer ou trouver un utilisateur par adresse Ethereum
-  async findOrCreateUser(address, userData = {}) {
+  async login(address) {
     try {
-      // Vérifier si l'utilisateur existe déjà
+      console.log(`🔐 Tentative de connexion pour: ${address}`);
+      
+      // Vérifier si l'utilisateur existe
       let user = await prisma.user.findUnique({
         where: { address: address.toLowerCase() }
       });
 
+      // Créer l'utilisateur s'il n'existe pas
       if (!user) {
-        // Créer un nouvel utilisateur
+        console.log(`👤 Création nouvel utilisateur: ${address}`);
         user = await prisma.user.create({
           data: {
             address: address.toLowerCase(),
-            name: userData.name || `User_${address.slice(0, 8)}`,
-            email: userData.email || null,
-            firstName: userData.firstName || null,
-            lastName: userData.lastName || null,
-            country: userData.country || null
+            name: `User_${address.slice(-6)}`,
+            isVerified: false
           }
-        });
-
-        console.log(`✅ New user created: ${user.address}`);
-      } else {
-        // Mettre à jour lastLogin
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLogin: new Date() }
         });
       }
 
-      return user;
+      // Supprimer les anciennes sessions de cet utilisateur
+      await prisma.userSession.deleteMany({
+        where: { userId: user.id }
+      });
+
+      // Générer un nouveau token unique
+      const tokenPayload = {
+        userId: user.id,
+        address: user.address,
+        timestamp: Date.now(),
+        random: Math.random().toString(36)
+      };
+
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET || 'default-secret', {
+        expiresIn: '24h'
+      });
+
+      // Créer une nouvelle session
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24);
+
+      const session = await prisma.userSession.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt,
+          isActive: true
+        }
+      });
+
+      console.log(`✅ Connexion réussie pour: ${address}`);
+
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          address: user.address,
+          name: user.name,
+          isVerified: user.isVerified
+        },
+        token,
+        expiresAt
+      };
+
     } catch (error) {
-      console.error('Error in findOrCreateUser:', error);
+      console.error('❌ Erreur login:', error);
       throw error;
     }
   }
 
-  // Créer une session utilisateur
-  async createSession(userId, token, metadata = {}) {
+  async verifyToken(token) {
+    try {
+      // Vérifier le JWT
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret');
+      
+      // Vérifier que la session existe et est active
+      const session = await prisma.userSession.findFirst({
+        where: {
+          token,
+          isActive: true,
+          expiresAt: {
+            gt: new Date()
+          }
+        },
+        include: {
+          user: true
+        }
+      });
+
+      if (!session) {
+        throw new Error('Session invalide ou expirée');
+      }
+
+      return {
+        valid: true,
+        user: session.user
+      };
+
+    } catch (error) {
+      return {
+        valid: false,
+        error: error.message
+      };
+    }
+  }
+
+  async logout(token) {
+    try {
+      await prisma.userSession.updateMany({
+        where: { token },
+        data: { isActive: false }
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Erreur logout:', error);
+      throw error;
+    }
+  }
+
+  async updateProfile(userId, profileData) {
+    try {
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: profileData
+      });
+
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          address: user.address,
+          name: user.name,
+          isVerified: user.isVerified
+        }
+      };
+    } catch (error) {
+      console.error('❌ Erreur mise à jour profil:', error);
+      throw error;
+    }
+  }
+
+  async createSession(userId, token) {
     try {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24); // 24h d'expiration
@@ -80,138 +168,24 @@ class AuthService {
           userId,
           token,
           expiresAt,
-          userAgent: metadata.userAgent || null,
-          ipAddress: metadata.ipAddress || null
+          isActive: true
         }
       });
 
       return session;
     } catch (error) {
-      console.error('Error creating session:', error);
+      console.error('❌ Erreur création session:', error);
       throw error;
     }
   }
 
-  // Valider une session
-  async validateSession(token) {
-    try {
-      const session = await prisma.userSession.findUnique({
-        where: { token },
-        include: { user: true }
-      });
-
-      if (!session || !session.isActive || session.expiresAt < new Date()) {
-        throw new Error('Invalid or expired session');
-      }
-
-      return session;
-    } catch (error) {
-      console.error('Error validating session:', error);
-      throw error;
-    }
+  async hashPassword(password) {
+    return bcrypt.hash(password, 10);
   }
 
-  // Déconnexion (invalider session)
-  async logout(token) {
-    try {
-      await prisma.userSession.update({
-        where: { token },
-        data: { isActive: false }
-      });
-
-      console.log('✅ User logged out successfully');
-    } catch (error) {
-      console.error('Error during logout:', error);
-      throw error;
-    }
-  }
-
-  // Nettoyer les sessions expirées
-  async cleanExpiredSessions() {
-    try {
-      const result = await prisma.userSession.deleteMany({
-        where: {
-          OR: [
-            { expiresAt: { lt: new Date() } },
-            { isActive: false }
-          ]
-        }
-      });
-
-      console.log(`🧹 Cleaned ${result.count} expired sessions`);
-      return result.count;
-    } catch (error) {
-      console.error('Error cleaning expired sessions:', error);
-      throw error;
-    }
-  }
-
-  // Obtenir les informations utilisateur par token
-  async getUserByToken(token) {
-    try {
-      const decoded = this.verifyToken(token);
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: {
-          id: true,
-          address: true,
-          name: true,
-          email: true,
-          isVerified: true,
-          role: true,
-          createdAt: true,
-          lastLogin: true,
-          firstName: true,
-          lastName: true,
-          country: true
-        }
-      });
-
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      return user;
-    } catch (error) {
-      console.error('Error getting user by token:', error);
-      throw error;
-    }
-  }
-
-  // Mettre à jour le profil utilisateur
-  async updateUserProfile(userId, updateData) {
-    try {
-      const user = await prisma.user.update({
-        where: { id: userId },
-        data: {
-          ...updateData,
-          updatedAt: new Date()
-        },
-        select: {
-          id: true,
-          address: true,
-          name: true,
-          email: true,
-          isVerified: true,
-          firstName: true,
-          lastName: true,
-          country: true,
-          passportImage: true
-        }
-      });
-
-      return user;
-    } catch (error) {
-      console.error('Error updating user profile:', error);
-      throw error;
-    }
-  }
-
-  // Vérifier si une adresse Ethereum est valide
-  isValidAddress(address) {
-    return /^0x[a-fA-F0-9]{40}$/.test(address);
+  async comparePasswords(password, hashedPassword) {
+    return bcrypt.compare(password, hashedPassword);
   }
 }
 
-const authService = new AuthService();
-module.exports = authService;
+module.exports = new AuthService();

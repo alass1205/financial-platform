@@ -77,6 +77,29 @@ class ApiService {
     }
   }
 
+  // Auth endpoints
+  async login(address) {
+    try {
+      const response = await this.client.post('/auth/login', { address })
+      if (response.data.token) {
+        localStorage.setItem('authToken', response.data.token)
+      }
+      return response.data
+    } catch (error) {
+      throw this.handleError(error)
+    }
+  }
+
+  async getProfile() {
+    try {
+      const response = await this.client.get('/auth/me')
+      return response.data
+    } catch (error) {
+      throw this.handleError(error)
+    }
+  }
+
+  // Gestion des erreurs
   // 💰 Portfolio endpoints
   async getPortfolioBalances() {
     try {
@@ -105,29 +128,6 @@ class ApiService {
     }
   }
 
-  // Auth endpoints
-  async login(address) {
-    try {
-      const response = await this.client.post('/auth/login', { address })
-      if (response.data.token) {
-        localStorage.setItem('authToken', response.data.token)
-      }
-      return response.data
-    } catch (error) {
-      throw this.handleError(error)
-    }
-  }
-
-  async getProfile() {
-    try {
-      const response = await this.client.get('/auth/me')
-      return response.data
-    } catch (error) {
-      throw this.handleError(error)
-    }
-  }
-
-  // Gestion des erreurs
   handleError(error) {
     if (error.response) {
       return new Error(error.response.data.message || error.response.data.error || 'Erreur API')
@@ -151,3 +151,26 @@ class ApiService {
 
 export const apiService = new ApiService()
 export default apiService
+
+  // 💰 Portfolio endpoints
+  async getPortfolioBalances() {
+    try {
+      const response = await this.client.get('/portfolio/balances')
+      return response.data
+    } catch (error) {
+      throw this.handleError(error)
+    }
+  }
+
+  async getPortfolioSummary() {
+    try {
+      const response = await this.client.get('/portfolio/summary')
+      return response.data
+    } catch (error) {
+      throw this.handleError(error)
+    }
+  }
+
+  async getPortfolioPerformance() {
+    try {
+      const response = await this.client.get('/portfolio/performance')
