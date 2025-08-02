@@ -89,6 +89,35 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// 📖 GET /api/trading/orderbook/:pair - Order book
+router.get('/orderbook/:pair', async (req, res) => {
+  try {
+    const { pair } = req.params;
+    console.log(`📖 Requête orderbook: ${pair}`);
+
+    const [baseToken, quoteToken] = pair.split('/');
+    
+    res.json({
+      status: 'OK',
+      orderBook: {
+        pair,
+        baseToken,
+        quoteToken,
+        bids: [],
+        asks: [],
+        lastUpdate: new Date().toISOString()
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur orderbook:', error);
+    res.status(500).json({ 
+      error: 'Failed to get orderbook', 
+      message: error.message 
+    });
+  }
+});
 
 // 📋 GET /api/trading/orders - Mes ordres
 router.get('/orders', async (req, res) => {
@@ -156,28 +185,22 @@ router.delete('/order/:id', async (req, res) => {
 });
 
 
-
-// 📖 GET /api/trading/orderbook/:pair - Order book
+// 📖 GET /api/trading/orderbook/:pair - Order book vide
 router.get('/orderbook/:pair', async (req, res) => {
-  try {
-    const { pair } = req.params;
-    console.log(`📖 Requête orderbook: ${pair}`);
-    res.json({
-      status: 'OK',
-      orderBook: { 
-        pair, 
-        baseToken: pair.split('/')[0], 
-        quoteToken: pair.split('/')[1],
-        buyOrders: [], 
-        sellOrders: [], 
-        lastUpdate: new Date().toISOString() 
-      },
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('❌ Erreur orderbook:', error);
-    res.status(500).json({ error: 'Failed to get orderbook' });
-  }
+  const { pair } = req.params;
+  console.log(`📖 Requête orderbook: ${pair}`);
+  res.json({
+    status: 'OK',
+    orderBook: { 
+      pair, 
+      baseToken: pair.split('/')[0], 
+      quoteToken: pair.split('/')[1],
+      bids: [], 
+      asks: [], 
+      lastUpdate: new Date().toISOString() 
+    },
+    timestamp: new Date().toISOString()
+  });
 });
 
 module.exports = router;

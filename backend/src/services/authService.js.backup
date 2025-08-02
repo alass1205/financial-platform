@@ -186,6 +186,9 @@ class AuthService {
   async comparePasswords(password, hashedPassword) {
     return bcrypt.compare(password, hashedPassword);
   }
+}
+
+module.exports = new AuthService();
 
   // 🔧 MÉTHODE MANQUANTE - Trouver ou créer un utilisateur
   async findOrCreateUser(address, userData = {}) {
@@ -260,6 +263,36 @@ class AuthService {
     }
   }
 
+  // 🔧 MÉTHODE MANQUANTE - Créer une session
+  async createSession(userId, token, metadata = {}) {
+    try {
+      // Supprimer les anciennes sessions de cet utilisateur
+      await prisma.userSession.deleteMany({
+        where: { userId }
+      });
+
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // 24h d'expiration
+
+      const session = await prisma.userSession.create({
+        data: {
+          userId,
+          token,
+          expiresAt,
+          isActive: true,
+          userAgent: metadata.userAgent || null,
+          ipAddress: metadata.ipAddress || null
+        }
+      });
+
+      console.log(`📝 Session créée pour user ${userId}`);
+      return session;
+    } catch (error) {
+      console.error('❌ Erreur création session:', error);
+      throw error;
+    }
+  }
+
   // 🔧 MÉTHODE MANQUANTE - Récupérer utilisateur par token
   async getUserByToken(token) {
     try {
@@ -310,6 +343,3 @@ class AuthService {
       throw error;
     }
   }
-}
-
-module.exports = new AuthService();

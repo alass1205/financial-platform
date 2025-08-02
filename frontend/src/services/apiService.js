@@ -43,7 +43,7 @@ class ApiService {
 
   async getOrderBook(pair) {
     try {
-      const response = await this.client.get(`/trading/orderbook/${pair}`)
+      const response = await this.client.get(`/trading/orderbook/${encodeURIComponent(pair)}`)
       return response.data
     } catch (error) {
       throw this.handleError(error)

@@ -1,0 +1,305 @@
+const express = require('express');
+const tradingService = require('../services/tradingService');
+const { requireAuth } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Middleware d'authentification pour toutes les routes trading
+router.use(requireAuth);
+
+// 📊 GET /api/trading/orderbook/:pair - Obtenir le carnet d'ordres
+router.get('/orderbook/:pair', async (req, res) => {
+  try {
+    const { pair } = req.params;
+    const validPairs = ['CLV/TRG', 'ROO/TRG', 'GOV/TRG'];
+    
+    if (!validPairs.includes(pair)) {
+      return res.status(400).json({
+        error: 'Invalid trading pair',
+        validPairs
+      });
+    }
+
+    const orderBook = await tradingService.getOrderBook(pair);
+    
+    res.json({
+      status: 'OK',
+      pair,
+      orderBook,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error getting order book:', error);
+    res.status(500).json({
+      error: 'Failed to get order book',
+      message: error.message
+    });
+  }
+});
+
+// 📝 POST /api/trading/order - Créer un nouvel ordre
+router.post('/order', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { assetSymbol, type, price, quantity } = req.body;
+
+    // Validation des données
+    if (!assetSymbol || !type || !price || !quantity) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['assetSymbol', 'type', 'price', 'quantity']
+      });
+    }
+
+    if (!['BUY', 'SELL'].includes(type.toUpperCase())) {
+      return res.status(400).json({
+        error: 'Invalid order type',
+        validTypes: ['BUY', 'SELL']
+      });
+    }
+
+    const validAssets = ['CLV', 'ROO', 'GOV'];
+    if (!validAssets.includes(assetSymbol.toUpperCase())) {
+      return res.status(400).json({
+        error: 'Invalid asset symbol',
+        validAssets
+      });
+    }
+
+    const order = await tradingService.createOrder(userId, {
+      assetSymbol: assetSymbol.toUpperCase(),
+      type: type.toUpperCase(),
+      price: parseFloat(price),
+      quantity: parseFloat(quantity)
+    });
+
+    res.status(201).json({
+      status: 'OK',
+      message: 'Order created successfully',
+      order: {
+        id: order.id,
+        type: order.type,
+        assetSymbol: order.asset.symbol,
+        price: order.price,
+        quantity: order.quantity,
+        remaining: order.remaining,
+        status: order.status,
+        createdAt: order.createdAt
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error creating order:', error);
+    res.status(400).json({
+      error: 'Failed to create order',
+      message: error.message
+    });
+  }
+});
+
+// 📋 GET /api/trading/orders - Obtenir les ordres de l'utilisateur
+router.get('/orders', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status } = req.query;
+
+    const orders = await tradingService.getUserOrders(userId, status);
+
+    res.json({
+      status: 'OK',
+      orders: orders.map(order => ({
+        id: order.id,
+        type: order.type,
+        assetSymbol: order.asset.symbol,
+        assetName: order.asset.name,
+        price: order.price,
+        quantity: order.quantity,
+        filled: order.filled,
+        remaining: order.remaining,
+        status: order.status,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt
+      })),
+      count: orders.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error getting user orders:', error);
+    res.status(500).json({
+      error: 'Failed to get orders',
+      message: error.message
+    });
+  }
+});
+
+// 📈 GET /api/trading/trades - Obtenir l'historique des trades
+router.get('/trades', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const trades = await tradingService.getUserTrades(userId);
+
+    res.json({
+      status: 'OK',
+      trades: trades.map(trade => ({
+        id: trade.id,
+        assetSymbol: trade.asset.symbol,
+        assetName: trade.asset.name,
+        price: trade.price,
+        quantity: trade.quantity,
+        side: trade.buyerId === userId ? 'BUY' : 'SELL',
+        counterparty: trade.buyerId === userId ? trade.seller.name : trade.buyer.name,
+        executedAt: trade.executedAt,
+        totalValue: (parseFloat(trade.price) * parseFloat(trade.quantity)).toFixed(2)
+      })),
+      count: trades.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error getting user trades:', error);
+    res.status(500).json({
+      error: 'Failed to get trades',
+      message: error.message
+    });
+  }
+});
+
+// ❌ DELETE /api/trading/order/:orderId - Annuler un ordre
+router.delete('/order/:orderId', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { orderId } = req.params;
+
+    await tradingService.cancelOrder(orderId, userId);
+
+    res.json({
+      status: 'OK',
+      message: 'Order cancelled successfully',
+      orderId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error cancelling order:', error);
+    res.status(400).json({
+      error: 'Failed to cancel order',
+      message: error.message
+    });
+  }
+});
+
+module.exports = router;
+
+// 📊 GET /api/trading/stats - Statistiques globales de trading
+router.get('/stats', async (req, res) => {
+  try {
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+
+    // Statistiques de base
+    const totalOrders = await prisma.order.count();
+    const totalTrades = await prisma.trade.count();
+    const activeOrders = await prisma.order.count({
+      where: { status: 'PENDING' }
+    });
+
+    // Volume total (somme des trades exécutés)
+    const volumeResult = await prisma.trade.aggregate({
+      _sum: { quantity: true }
+    });
+
+    await prisma.$disconnect();
+
+    const stats = {
+      totalOrders,
+      totalTrades,
+      activeOrders,
+      totalVolume: volumeResult._sum.quantity || 0,
+      lastUpdate: new Date().toISOString()
+    };
+
+    res.json({
+      status: 'OK',
+      stats,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur stats trading:', error);
+    res.status(500).json({
+      error: 'Failed to get trading stats',
+      message: error.message
+    });
+  }
+});
+
+// 📖 GET /api/trading/orderbook/:pair - Order book pour une paire
+router.get('/orderbook/:pair', async (req, res) => {
+  try {
+    const { pair } = req.params;
+    const [baseToken, quoteToken] = pair.split('/');
+
+    if (!baseToken || !quoteToken) {
+      return res.status(400).json({
+        error: 'Invalid trading pair format. Use BASE/QUOTE (e.g., CLV/TRG)'
+      });
+    }
+
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+
+    // Ordres d'achat (BUY) - triés par prix décroissant
+    const buyOrders = await prisma.order.findMany({
+      where: {
+        type: 'BUY',
+        baseToken,
+        quoteToken,
+        status: 'PENDING'
+      },
+      orderBy: { price: 'desc' },
+      take: 20 // Top 20 ordres
+    });
+
+    // Ordres de vente (SELL) - triés par prix croissant
+    const sellOrders = await prisma.order.findMany({
+      where: {
+        type: 'SELL',
+        baseToken,
+        quoteToken,
+        status: 'PENDING'
+      },
+      orderBy: { price: 'asc' },
+      take: 20 // Top 20 ordres
+    });
+
+    await prisma.$disconnect();
+
+    const orderBook = {
+      pair,
+      baseToken,
+      quoteToken,
+      bids: buyOrders.map(order => ({
+        price: parseFloat(order.price),
+        quantity: parseFloat(order.quantity),
+        total: parseFloat(order.price) * parseFloat(order.quantity)
+      })),
+      asks: sellOrders.map(order => ({
+        price: parseFloat(order.price),
+        quantity: parseFloat(order.quantity),
+        total: parseFloat(order.price) * parseFloat(order.quantity)
+      })),
+      lastUpdate: new Date().toISOString()
+    };
+
+    res.json({
+      status: 'OK',
+      orderBook,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur orderbook:', error);
+    res.status(500).json({
+      error: 'Failed to get order book',
+      message: error.message
+    });
+  }
+});

@@ -127,6 +127,10 @@ export function useTokens() {
   // Calculer la valeur totale du portfolio
   const portfolioValue = tokenService.calculatePortfolioValue(balances)
 
+  // Vérifier si on a des tokens ou NFTs
+  const hasTokens = balances.tokens && Object.keys(balances.tokens).length > 0
+  const hasNFTs = balances.nfts && balances.nfts.count > 0
+
   return {
     // État
     balances,
@@ -136,6 +140,8 @@ export function useTokens() {
     portfolioValue,
     useDatabase,
     isLoggedIn,
+    hasTokens,
+    hasNFTs,
     
     // Actions
     loadBalances,
