@@ -156,7 +156,7 @@ async function startServer() {
     
     // Initialiser le trading service
     console.log('⏳ Initializing Trading service...');
-    await tradingService.initialize();
+    // Trading service auto-initialized in constructor
     isTradingReady = true;
     console.log('✅ Trading service ready');
     

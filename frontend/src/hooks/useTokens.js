@@ -111,6 +111,17 @@ export function useTokens() {
     }
   }, [isConnected, account, loadBalances])
 
+  // 🔄 NOUVEAU - Écouter l'event de refresh après trade
+  useEffect(() => {
+    const handlePortfolioRefresh = () => {
+      console.log('🔄 Portfolio refresh déclenché par trade')
+      loadBalances()
+    }
+
+    window.addEventListener('portfolio-refresh', handlePortfolioRefresh)
+    return () => window.removeEventListener('portfolio-refresh', handlePortfolioRefresh)
+  }, [loadBalances])
+
   // Auto-refresh après trades (écouter les changements de route)
   useEffect(() => {
     const handleFocus = () => {

@@ -1,61 +1,29 @@
 const { PrismaClient } = require('@prisma/client');
-const web3Service = require('./web3Service');
-const eventService = require('./eventService');
-
 const prisma = new PrismaClient();
 
 class TradingService {
   constructor() {
-    this.isInitialized = false;
-    this.orderBook = new Map(); // Cache des ordres actifs
-    this.tradingPairs = ['CLV/TRG', 'ROO/TRG', 'GOV/TRG']; // Paires de trading
+    this.orderBook = new Map();
+    this.matchingInterval = null;
+    this.startMatching();
   }
 
-  async initialize() {
-    try {
-      console.log('⏳ Initializing Trading Service...');
-      
-      // Charger les ordres actifs depuis la DB
-      await this.loadActiveOrders();
-      
-      // Démarrer le matching automatique
-      this.startMatchingEngine();
-      
-      this.isInitialized = true;
-      console.log('✅ Trading Service initialized successfully');
-    } catch (error) {
-      console.error('❌ Trading Service initialization failed:', error);
-      throw error;
-    }
-  }
-
-  async loadActiveOrders() {
-    try {
-      const activeOrders = await prisma.order.findMany({
-        where: {
-          status: { in: ['OPEN', 'PARTIALLY_FILLED'] }
-        },
-        include: {
-          user: { select: { address: true, name: true } },
-          asset: { select: { symbol: true, name: true } }
-        },
-        orderBy: { createdAt: 'asc' } // FIFO
-      });
-
-      // Organiser par paire de trading
-      this.orderBook.clear();
-      for (const order of activeOrders) {
-        const pair = `${order.asset.symbol}/TRG`;
-        if (!this.orderBook.has(pair)) {
-          this.orderBook.set(pair, { buy: [], sell: [] });
-        }
-        this.orderBook.get(pair)[order.type.toLowerCase()].push(order);
+  startMatching() {
+    this.matchingInterval = setInterval(async () => {
+      try {
+        await this.matchAllPairs();
+      } catch (error) {
+        console.error('❌ Erreur matching automatique:', error);
       }
+    }, 5000);
+    
+    console.log('🔄 Matching automatique démarré (toutes les 5s)');
+  }
 
-      console.log(`📖 Loaded ${activeOrders.length} active orders into order book`);
-    } catch (error) {
-      console.error('❌ Error loading active orders:', error);
-      throw error;
+  async matchAllPairs() {
+    const pairs = ['CLV/TRG', 'ROO/TRG', 'GOV/TRG'];
+    for (const pair of pairs) {
+      await this.matchOrders(pair);
     }
   }
 
@@ -63,19 +31,18 @@ class TradingService {
     try {
       const { assetSymbol, type, price, quantity } = orderData;
       
-      // Validation des données
-      await this.validateOrder(userId, orderData);
+      console.log(`📝 Creating order: ${type} ${quantity} ${assetSymbol} at ${price}`);
       
-      // Obtenir l'asset
+      await this.validateOrder(userId, orderData);
+
       const asset = await prisma.asset.findUnique({
         where: { symbol: assetSymbol }
       });
-      
+
       if (!asset) {
-        throw new Error(`Asset ${assetSymbol} not found`);
+        throw new Error(`Asset ${assetSymbol} non trouvé`);
       }
 
-      // Créer l'ordre en base
       const order = await prisma.order.create({
         data: {
           userId,
@@ -92,21 +59,10 @@ class TradingService {
         }
       });
 
-      // Réserver les fonds
-      await this.reserveFunds(userId, order);
-
-      // Ajouter à l'order book
       const pair = `${assetSymbol}/TRG`;
-      if (!this.orderBook.has(pair)) {
-        this.orderBook.set(pair, { buy: [], sell: [] });
-      }
-      this.orderBook.get(pair)[type.toLowerCase()].push(order);
-
-      console.log(`📝 Order created: ${order.type} ${order.quantity} ${assetSymbol} at ${order.price} TRG`);
-
-      // Déclencher le matching
       await this.matchOrders(pair);
 
+      console.log(`✅ Order created: ${order.id}`);
       return order;
     } catch (error) {
       console.error('❌ Error creating order:', error);
@@ -114,177 +70,82 @@ class TradingService {
     }
   }
 
-  async validateOrder(userId, orderData) {
-    const { assetSymbol, type, price, quantity } = orderData;
-
-    // Validations de base
-    if (!assetSymbol || !type || !price || !quantity) {
-      throw new Error('Missing required order parameters');
-    }
-
-    if (!['BUY', 'SELL'].includes(type.toUpperCase())) {
-      throw new Error('Order type must be BUY or SELL');
-    }
-
-    const priceNum = parseFloat(price);
-    const quantityNum = parseFloat(quantity);
-
-    if (priceNum <= 0 || quantityNum <= 0) {
-      throw new Error('Price and quantity must be positive');
-    }
-
-    // Vérifier les balances
-    if (type.toUpperCase() === 'BUY') {
-      // Pour acheter, il faut avoir assez de TRG
-      const trgNeeded = (priceNum * quantityNum).toString();
-      await this.checkBalance(userId, 'TRG', trgNeeded);
-    } else {
-      // Pour vendre, il faut avoir assez de l'asset
-      await this.checkBalance(userId, assetSymbol, quantity.toString());
-    }
-  }
-
-  async checkBalance(userId, assetSymbol, amountNeeded) {
-    const asset = await prisma.asset.findUnique({
-      where: { symbol: assetSymbol }
-    });
-
-    if (!asset) {
-      throw new Error(`Asset ${assetSymbol} not found`);
-    }
-
-    const balance = await prisma.balance.findUnique({
-      where: { 
-        userId_assetId: {
-          userId,
-          assetId: asset.id
-        }
-      }
-    });
-
-    if (!balance || parseFloat(balance.available) < parseFloat(amountNeeded)) {
-      throw new Error(`Insufficient ${assetSymbol} balance`);
-    }
-  }
-
-  async reserveFunds(userId, order) {
-    try {
-      if (order.type === 'BUY') {
-        // Réserver des TRG
-        const trgAmount = (parseFloat(order.price) * parseFloat(order.quantity)).toString();
-        await this.updateBalance(userId, 'TRG', trgAmount, 'reserve');
-      } else {
-        // Réserver l'asset à vendre
-        await this.updateBalance(userId, order.asset.symbol, order.quantity, 'reserve');
-      }
-    } catch (error) {
-      console.error('❌ Error reserving funds:', error);
-      throw error;
-    }
-  }
-
-  async updateBalance(userId, assetSymbol, amount, operation) {
-    const asset = await prisma.asset.findUnique({
-      where: { symbol: assetSymbol }
-    });
-
-    const balance = await prisma.balance.findUnique({
-      where: { 
-        userId_assetId: {
-          userId,
-          assetId: asset.id
-        }
-      }
-    });
-
-    if (!balance) {
-      throw new Error(`Balance not found for ${assetSymbol}`);
-    }
-
-    const amountFloat = parseFloat(amount);
-    const availableFloat = parseFloat(balance.available);
-    const reservedFloat = parseFloat(balance.reserved);
-
-    let newAvailable, newReserved;
-
-    switch (operation) {
-      case 'reserve':
-        newAvailable = availableFloat - amountFloat;
-        newReserved = reservedFloat + amountFloat;
-        break;
-      case 'unreserve':
-        newAvailable = availableFloat + amountFloat;
-        newReserved = reservedFloat - amountFloat;
-        break;
-      case 'add':
-        newAvailable = availableFloat + amountFloat;
-        newReserved = reservedFloat;
-        break;
-      case 'subtract':
-        newReserved = reservedFloat - amountFloat;
-        newAvailable = availableFloat;
-        break;
-      default:
-        throw new Error(`Unknown balance operation: ${operation}`);
-    }
-
-    if (newAvailable < 0 || newReserved < 0) {
-      throw new Error('Insufficient balance for operation');
-    }
-
-    await prisma.balance.update({
-      where: { id: balance.id },
-      data: {
-        available: newAvailable.toString(),
-        reserved: newReserved.toString(),
-        total: (newAvailable + newReserved).toString()
-      }
-    });
-  }
-
   async matchOrders(pair) {
     try {
-      const orders = this.orderBook.get(pair);
-      if (!orders || orders.buy.length === 0 || orders.sell.length === 0) {
-        return; // Pas assez d'ordres pour matcher
-      }
+      const [baseToken] = pair.split('/');
+      const asset = await prisma.asset.findUnique({
+        where: { symbol: baseToken }
+      });
 
-      // Trier les ordres (FIFO pour même prix)
-      orders.buy.sort((a, b) => parseFloat(b.price) - parseFloat(a.price) || new Date(a.createdAt) - new Date(b.createdAt));
-      orders.sell.sort((a, b) => parseFloat(a.price) - parseFloat(b.price) || new Date(a.createdAt) - new Date(b.createdAt));
+      if (!asset) return;
 
-      let matched = true;
-      while (matched && orders.buy.length > 0 && orders.sell.length > 0) {
-        const buyOrder = orders.buy[0];
-        const sellOrder = orders.sell[0];
+      // Récupérer TOUS les ordres ouverts de la DB
+      const openOrders = await prisma.order.findMany({
+        where: {
+          assetId: asset.id,
+          status: { in: ['OPEN', 'PARTIALLY_FILLED'] },
+          remaining: { not: "0" }
+        },
+        include: {
+          user: { select: { address: true, name: true } },
+          asset: { select: { symbol: true, name: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      });
 
-        // Vérifier si les prix se croisent
-        if (parseFloat(buyOrder.price) >= parseFloat(sellOrder.price)) {
-          await this.executeTrade(buyOrder, sellOrder);
-          matched = true;
-        } else {
-          matched = false;
+      if (openOrders.length < 2) return; // Pas assez d'ordres
+
+      const buyOrders = openOrders
+        .filter(o => o.type === 'BUY')
+        .sort((a, b) => parseFloat(b.price) - parseFloat(a.price)); // Prix décroissant
+
+      const sellOrders = openOrders
+        .filter(o => o.type === 'SELL')
+        .sort((a, b) => parseFloat(a.price) - parseFloat(b.price)); // Prix croissant
+
+      console.log(`🔄 Matching ${pair}: ${buyOrders.length} buy orders, ${sellOrders.length} sell orders`);
+
+      // Matching FIFO
+      for (const buyOrder of buyOrders) {
+        for (const sellOrder of sellOrders) {
+          const buyPrice = parseFloat(buyOrder.price);
+          const sellPrice = parseFloat(sellOrder.price);
+          const buyRemaining = parseFloat(buyOrder.remaining);
+          const sellRemaining = parseFloat(sellOrder.remaining);
+
+          if (buyPrice >= sellPrice && buyRemaining > 0 && sellRemaining > 0) {
+            console.log(`💰 Match found: BUY ${buyPrice} >= SELL ${sellPrice}`);
+            await this.executeTrade(buyOrder, sellOrder);
+            
+            // Recharger les ordres après le trade pour avoir les bonnes quantités
+            const updatedBuyOrder = await prisma.order.findUnique({ where: { id: buyOrder.id } });
+            const updatedSellOrder = await prisma.order.findUnique({ where: { id: sellOrder.id } });
+            
+            buyOrder.remaining = updatedBuyOrder.remaining;
+            sellOrder.remaining = updatedSellOrder.remaining;
+          }
         }
       }
+
     } catch (error) {
-      console.error('❌ Error in order matching:', error);
+      console.error(`❌ Erreur matching ${pair}:`, error);
     }
   }
 
   async executeTrade(buyOrder, sellOrder) {
     try {
-      // Calculer la quantité à échanger
-      const buyRemaining = parseFloat(buyOrder.remaining);
-      const sellRemaining = parseFloat(sellOrder.remaining);
-      const tradeQuantity = Math.min(buyRemaining, sellRemaining);
-      
-      // Prix d'exécution (prix du sell order, FIFO)
+      const tradeQuantity = Math.min(parseFloat(buyOrder.remaining), parseFloat(sellOrder.remaining));
       const tradePrice = parseFloat(sellOrder.price);
-      const totalValue = tradeQuantity * tradePrice;
+      const tradeValue = tradeQuantity * tradePrice;
 
-      console.log(`🔄 Executing trade: ${tradeQuantity} ${buyOrder.asset.symbol} at ${tradePrice} TRG`);
+      if (tradeQuantity <= 0) {
+        console.log('⚠️ Trade quantity is 0, skipping');
+        return;
+      }
 
-      // Créer le trade en base
+      console.log(`💰 Executing trade: ${tradeQuantity} ${sellOrder.asset.symbol} at ${tradePrice} TRG (total: ${tradeValue} TRG)`);
+
+      // 1. Créer le trade record
       const trade = await prisma.trade.create({
         data: {
           buyOrderId: buyOrder.id,
@@ -293,117 +154,187 @@ class TradingService {
           sellerId: sellOrder.userId,
           assetId: buyOrder.assetId,
           price: tradePrice.toString(),
-          quantity: tradeQuantity.toString()
+          quantity: tradeQuantity.toString(),
+          fee: "0"
         }
       });
 
-      // Mettre à jour les ordres
-      await this.updateOrderAfterTrade(buyOrder, tradeQuantity);
-      await this.updateOrderAfterTrade(sellOrder, tradeQuantity);
+      // 2. Mettre à jour les balances
+      await this.updateBalancesAfterTrade(buyOrder, sellOrder, tradeQuantity, tradeValue);
 
-      // Transférer les fonds
-      await this.transferFunds(buyOrder, sellOrder, tradeQuantity, totalValue);
+      // 3. Mettre à jour les ordres
+      await this.updateOrdersAfterTrade(buyOrder, sellOrder, tradeQuantity);
 
-      // Mettre à jour l'order book
-      await this.updateOrderBook(buyOrder, sellOrder, tradeQuantity);
+      console.log(`✅ Trade ${trade.id} executed successfully`);
 
-      console.log(`✅ Trade executed: ${trade.id}`);
-      return trade;
     } catch (error) {
-      console.error('❌ Error executing trade:', error);
-      throw error;
+      console.error('❌ Erreur exécution trade:', error);
     }
   }
 
-  async updateOrderAfterTrade(order, tradedQuantity) {
-    const newRemaining = parseFloat(order.remaining) - tradedQuantity;
-    const newFilled = parseFloat(order.filled) + tradedQuantity;
-    
-    let newStatus = 'OPEN';
-    if (newRemaining === 0) {
-      newStatus = 'FILLED';
-    } else if (newFilled > 0) {
-      newStatus = 'PARTIALLY_FILLED';
-    }
+  async updateBalancesAfterTrade(buyOrder, sellOrder, tradeQuantity, tradeValue) {
+    try {
+      console.log('🔄 Updating balances...');
 
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        remaining: newRemaining.toString(),
-        filled: newFilled.toString(),
-        status: newStatus
+      // ACHETEUR: +asset, -TRG
+      await this.updateUserBalance(buyOrder.userId, sellOrder.asset.symbol, tradeQuantity, 'ADD');
+      await this.updateUserBalance(buyOrder.userId, 'TRG', tradeValue, 'SUBTRACT');
+
+      // VENDEUR: -asset, +TRG
+      await this.updateUserBalance(sellOrder.userId, sellOrder.asset.symbol, tradeQuantity, 'SUBTRACT');
+      await this.updateUserBalance(sellOrder.userId, 'TRG', tradeValue, 'ADD');
+
+      console.log('✅ Balances updated successfully');
+
+    } catch (error) {
+      console.error('❌ Erreur mise à jour balances:', error);
+    }
+  }
+
+  async updateUserBalance(userId, assetSymbol, amount, operation) {
+    try {
+      // Validation stricte
+      if (!userId || !assetSymbol || !amount || isNaN(amount) || amount <= 0) {
+        console.log(`⚠️ Paramètres invalides pour balance update: ${userId}, ${assetSymbol}, ${amount}, ${operation}`);
+        return;
       }
-    });
 
-    // Mettre à jour l'objet en mémoire
-    order.remaining = newRemaining.toString();
-    order.filled = newFilled.toString();
-    order.status = newStatus;
-  }
+      const asset = await prisma.asset.findUnique({
+        where: { symbol: assetSymbol }
+      });
 
-  async transferFunds(buyOrder, sellOrder, quantity, totalValue) {
-    // L'acheteur reçoit l'asset, perd les TRG réservés
-    await this.updateBalance(buyOrder.userId, buyOrder.asset.symbol, quantity.toString(), 'add');
-    await this.updateBalance(buyOrder.userId, 'TRG', totalValue.toString(), 'subtract');
-
-    // Le vendeur reçoit les TRG, perd l'asset réservé  
-    await this.updateBalance(sellOrder.userId, 'TRG', totalValue.toString(), 'add');
-    await this.updateBalance(sellOrder.userId, sellOrder.asset.symbol, quantity.toString(), 'subtract');
-  }
-
-  async updateOrderBook(buyOrder, sellOrder, tradedQuantity) {
-    const pair = `${buyOrder.asset.symbol}/TRG`;
-    const orders = this.orderBook.get(pair);
-
-    // Retirer les ordres complètement remplis
-    if (parseFloat(buyOrder.remaining) === 0) {
-      const index = orders.buy.findIndex(o => o.id === buyOrder.id);
-      if (index > -1) orders.buy.splice(index, 1);
-    }
-
-    if (parseFloat(sellOrder.remaining) === 0) {
-      const index = orders.sell.findIndex(o => o.id === sellOrder.id);
-      if (index > -1) orders.sell.splice(index, 1);
-    }
-  }
-
-  startMatchingEngine() {
-    // Lancer le matching toutes les 5 secondes
-    setInterval(() => {
-      for (const pair of this.tradingPairs) {
-        this.matchOrders(pair);
+      if (!asset) {
+        console.log(`⚠️ Asset ${assetSymbol} non trouvé`);
+        return;
       }
-    }, 5000);
-    
-    console.log('⚙️ Matching engine started (5s interval)');
+
+      // Chercher la balance existante
+      let balance = await prisma.balance.findUnique({
+        where: {
+          userId_assetId: {
+            userId: userId,
+            assetId: asset.id
+          }
+        }
+      });
+
+      const currentTotal = balance ? parseFloat(balance.total || "0") : 0;
+      let newTotal;
+
+      if (operation === 'ADD') {
+        newTotal = currentTotal + amount;
+      } else if (operation === 'SUBTRACT') {
+        newTotal = Math.max(0, currentTotal - amount);
+      } else {
+        console.log(`⚠️ Opération invalide: ${operation}`);
+        return;
+      }
+
+      // Validation finale
+      if (isNaN(newTotal) || newTotal < 0) {
+        console.log(`⚠️ Résultat invalide: ${newTotal}`);
+        return;
+      }
+
+      // Mettre à jour ou créer la balance
+      if (balance) {
+        await prisma.balance.update({
+          where: { id: balance.id },
+          data: { 
+            available: newTotal.toString(),
+            total: newTotal.toString(),
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        await prisma.balance.create({
+          data: {
+            userId: userId,
+            assetId: asset.id,
+            available: newTotal.toString(),
+            reserved: "0",
+            total: newTotal.toString()
+          }
+        });
+      }
+
+      console.log(`💰 Balance ${assetSymbol}: ${currentTotal} ${operation} ${amount} = ${newTotal}`);
+
+    } catch (error) {
+      console.error(`❌ Erreur update balance ${assetSymbol}:`, error);
+    }
   }
 
-  async getOrderBook(pair) {
-    const orders = this.orderBook.get(pair);
-    if (!orders) return { buy: [], sell: [] };
+  async updateOrdersAfterTrade(buyOrder, sellOrder, tradeQuantity) {
+    try {
+      // Mettre à jour l'ordre d'achat
+      const newBuyRemaining = Math.max(0, parseFloat(buyOrder.remaining) - tradeQuantity);
+      const newBuyFilled = parseFloat(buyOrder.filled || 0) + tradeQuantity;
+      
+      await prisma.order.update({
+        where: { id: buyOrder.id },
+        data: {
+          filled: newBuyFilled.toString(),
+          remaining: newBuyRemaining.toString(),
+          status: newBuyRemaining > 0 ? 'PARTIALLY_FILLED' : 'FILLED'
+        }
+      });
 
-    return {
-      buy: orders.buy.map(o => ({
-        price: o.price,
-        quantity: o.remaining,
-        total: (parseFloat(o.price) * parseFloat(o.remaining)).toFixed(2)
-      })),
-      sell: orders.sell.map(o => ({
-        price: o.price,
-        quantity: o.remaining,
-        total: (parseFloat(o.price) * parseFloat(o.remaining)).toFixed(2)
-      }))
-    };
+      // Mettre à jour l'ordre de vente
+      const newSellRemaining = Math.max(0, parseFloat(sellOrder.remaining) - tradeQuantity);
+      const newSellFilled = parseFloat(sellOrder.filled || 0) + tradeQuantity;
+      
+      await prisma.order.update({
+        where: { id: sellOrder.id },
+        data: {
+          filled: newSellFilled.toString(),
+          remaining: newSellRemaining.toString(),
+          status: newSellRemaining > 0 ? 'PARTIALLY_FILLED' : 'FILLED'
+        }
+      });
+
+      console.log(`📝 Orders updated: Buy=${newBuyRemaining}, Sell=${newSellRemaining}`);
+
+    } catch (error) {
+      console.error('❌ Erreur update orders:', error);
+    }
+  }
+
+  async validateOrder(userId, orderData) {
+    const { assetSymbol, type, price, quantity } = orderData;
+
+    if (!assetSymbol || !type || !price || !quantity) {
+      throw new Error('Paramètres manquants');
+    }
+
+    if (!['CLV', 'ROO', 'GOV'].includes(assetSymbol.toUpperCase())) {
+      throw new Error(`Asset invalide: ${assetSymbol}`);
+    }
+
+    if (!['BUY', 'SELL'].includes(type.toUpperCase())) {
+      throw new Error(`Type invalide: ${type}`);
+    }
+
+    if (parseFloat(price) <= 0 || parseFloat(quantity) <= 0) {
+      throw new Error('Prix et quantité doivent être positifs');
+    }
+
+    return true;
+  }
+
+  async reserveFunds(userId, order) {
+    // À implémenter plus tard
+    return true;
   }
 
   async getUserOrders(userId, status = null) {
-    const whereClause = { userId };
+    const where = { userId };
     if (status) {
-      whereClause.status = status;
+      where.status = status.toUpperCase();
     }
 
     return await prisma.order.findMany({
-      where: whereClause,
+      where,
       include: {
         asset: { select: { symbol: true, name: true } }
       },
@@ -420,54 +351,96 @@ class TradingService {
         ]
       },
       include: {
-        asset: { select: { symbol: true, name: true } },
-        buyer: { select: { address: true, name: true } },
-        seller: { select: { address: true, name: true } }
+        asset: { select: { symbol: true, name: true } }
       },
       orderBy: { executedAt: 'desc' }
     });
   }
 
+  async getOrderBook(pair) {
+    const [baseToken] = pair.split('/');
+    
+    const asset = await prisma.asset.findUnique({
+      where: { symbol: baseToken }
+    });
+
+    if (!asset) {
+      return { buy: [], sell: [] };
+    }
+
+    const openOrders = await prisma.order.findMany({
+      where: {
+        assetId: asset.id,
+        status: { in: ['OPEN', 'PARTIALLY_FILLED'] },
+        remaining: { not: "0" }
+      },
+      include: {
+        user: { select: { address: true } },
+        asset: { select: { symbol: true } }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    const buyOrders = openOrders
+      .filter(o => o.type === 'BUY')
+      .sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
+    
+    const sellOrders = openOrders
+      .filter(o => o.type === 'SELL')
+      .sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+
+    return {
+      buy: buyOrders.map(o => ({
+        id: o.id,
+        price: o.price,
+        quantity: o.remaining,
+        total: (parseFloat(o.price) * parseFloat(o.remaining)).toFixed(2),
+        user: o.user.address.slice(0, 8) + '...'
+      })),
+      sell: sellOrders.map(o => ({
+        id: o.id,
+        price: o.price,
+        quantity: o.remaining,
+        total: (parseFloat(o.price) * parseFloat(o.remaining)).toFixed(2),
+        user: o.user.address.slice(0, 8) + '...'
+      }))
+    };
+  }
+
   async cancelOrder(orderId, userId) {
     const order = await prisma.order.findFirst({
-      where: { id: orderId, userId },
-      include: { asset: true }
+      where: { id: orderId, userId }
     });
 
     if (!order) {
-      throw new Error('Order not found');
+      throw new Error('Ordre non trouvé');
     }
 
-    if (order.status === 'FILLED' || order.status === 'CANCELLED') {
-      throw new Error('Cannot cancel this order');
+    if (!['OPEN', 'PARTIALLY_FILLED'].includes(order.status)) {
+      throw new Error('Impossible d\'annuler cet ordre');
     }
 
-    // Libérer les fonds réservés
-    if (order.type === 'BUY') {
-      const trgToUnreserve = (parseFloat(order.price) * parseFloat(order.remaining)).toString();
-      await this.updateBalance(userId, 'TRG', trgToUnreserve, 'unreserve');
-    } else {
-      await this.updateBalance(userId, order.asset.symbol, order.remaining, 'unreserve');
-    }
-
-    // Marquer comme annulé
-    await prisma.order.update({
+    return await prisma.order.update({
       where: { id: orderId },
       data: { status: 'CANCELLED' }
     });
+  }
 
-    // Retirer de l'order book
-    const pair = `${order.asset.symbol}/TRG`;
-    const orders = this.orderBook.get(pair);
-    if (orders) {
-      const type = order.type.toLowerCase();
-      const index = orders[type].findIndex(o => o.id === orderId);
-      if (index > -1) orders[type].splice(index, 1);
+  async getTradingStats() {
+    try {
+      const totalTrades = await prisma.trade.count();
+      const totalOrders = await prisma.order.count();
+
+      return {
+        totalTrades,
+        totalOrders,
+        totalVolume: 0
+      };
+    } catch (error) {
+      console.error('❌ Erreur stats:', error);
+      return { totalTrades: 0, totalOrders: 0, totalVolume: 0 };
     }
-
-    console.log(`❌ Order cancelled: ${orderId}`);
   }
 }
 
-const tradingService = new TradingService();
-module.exports = tradingService;
+module.exports = new TradingService();

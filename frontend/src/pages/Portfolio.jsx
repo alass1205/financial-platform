@@ -120,6 +120,7 @@ function Portfolio() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* TRG - Stablecoin */}
             <TokenCard
+              key="TRG"
               symbol="TRG"
               name="Triangle Coin (Stablecoin)"
               balance={showValues ? parseFloat(balances.tokens.TRG?.formatted || 0).toFixed(2) : '••••'}
@@ -129,6 +130,7 @@ function Portfolio() {
             
             {/* CLV - Actions Clove */}
             <TokenCard
+              key="CLV"
               symbol="CLV"
               name="Clove Company (Actions)"
               balance={showValues ? parseFloat(balances.tokens.CLV?.formatted || 0).toFixed(0) : '••••'}
@@ -138,6 +140,7 @@ function Portfolio() {
             
             {/* ROO - Actions Rooibos */}
             <TokenCard
+              key="ROO"
               symbol="ROO"
               name="Rooibos Limited (Actions)"
               balance={showValues ? parseFloat(balances.tokens.ROO?.formatted || 0).toFixed(0) : '••••'}
@@ -163,6 +166,7 @@ function Portfolio() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Résumé NFT */}
             <TokenCard
+              key="GOV-summary"
               symbol="GOV"
               name="Government Bonds"
               balance={showValues ? `${balances.nfts.count} obligations` : '••••'}
@@ -175,14 +179,14 @@ function Portfolio() {
             <div className="card">
               <h3 className="font-bold text-gray-900 mb-4">📋 Détails des obligations</h3>
               <div className="space-y-3">
-                {balances.nfts.nfts.slice(0, 3).map((nft, index) => (
-                  <div key={nft.tokenId} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                {balances.nfts.nfts && balances.nfts.nfts.slice(0, 3).map((nft, index) => (
+                  <div key={nft.tokenId || `nft-${index}`} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                     <div>
-                      <p className="font-semibold text-gray-900">Bond #{nft.tokenId}</p>
-                      <p className="text-sm text-gray-600">{nft.interestRate} d'intérêt</p>
+                      <p className="font-semibold text-gray-900">Bond #{nft.tokenId || index + 1}</p>
+                      <p className="text-sm text-gray-600">{nft.interestRate || '10%'} d'intérêt</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-purple-600">{nft.value}</p>
+                      <p className="font-semibold text-purple-600">{nft.value || '200 TRG'}</p>
                     </div>
                   </div>
                 ))}

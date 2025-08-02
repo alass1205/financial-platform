@@ -1,6 +1,6 @@
 const express = require('express');
-const { requireAuth } = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -35,6 +35,8 @@ router.get('/balances', async (req, res) => {
     
     balances.forEach(balance => {
       const symbol = balance.asset.symbol;
+      
+      // 🔧 CORRECTION - Les balances sont déjà en unités normales, pas en wei
       const available = parseFloat(balance.available) || 0;
       const reserved = parseFloat(balance.reserved) || 0;
       const total = parseFloat(balance.total) || 0;
@@ -46,29 +48,27 @@ router.get('/balances', async (req, res) => {
           formattedBalances.nfts.count = count;
           formattedBalances.nfts.totalValue = count * 200; // 200 TRG par obligation
           
-          // Créer des NFT fictifs pour l'affichage
-          formattedBalances.nfts.nfts = Array.from({ length: count }, (_, i) => ({
-            id: i + 1,
-            value: '200',
-            interestRate: '10',
-            maturity: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-          }));
+          // Créer les détails des NFT
+          for (let i = 1; i <= count; i++) {
+            formattedBalances.nfts.nfts.push({
+              id: i,
+              value: "200",
+              interestRate: "10%",
+              maturity: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+            });
+          }
         }
       } else {
-        // Tokens ERC20 normaux - CONVERSION DEPUIS WEI
-        const availableFormatted = available / Math.pow(10, 18); // Conversion depuis wei
-        const reservedFormatted = reserved / Math.pow(10, 18);
-        const totalFormatted = total / Math.pow(10, 18);
-        
-        if (totalFormatted > 0) {
+        // Tokens normaux (TRG, CLV, ROO)
+        if (total > 0) {
           formattedBalances.tokens[symbol] = {
-            raw: total.toString(),
-            formatted: availableFormatted.toString(),
+            raw: (total * Math.pow(10, 18)).toString(), // Conversion pour compatibilité
+            formatted: total.toString(),
             symbol: symbol,
             name: balance.asset.name,
-            available: availableFormatted.toString(),
-            reserved: reservedFormatted.toString(),
-            total: totalFormatted.toString()
+            available: available.toString(),
+            reserved: reserved.toString(),
+            total: total.toString()
           };
         }
       }
@@ -116,7 +116,8 @@ router.get('/summary', async (req, res) => {
     
     balances.forEach(balance => {
       const symbol = balance.asset.symbol;
-      const available = parseFloat(balance.available) / Math.pow(10, 18); // Conversion wei
+      // 🔧 CORRECTION - Pas de conversion wei, les données sont déjà en unités
+      const available = parseFloat(balance.total) || 0;
       const price = prices[symbol] || 0;
       const value = available * price;
       
@@ -125,32 +126,48 @@ router.get('/summary', async (req, res) => {
         breakdown[symbol] = {
           quantity: available,
           price: price,
-          value: value,
-          percentage: 0 // Calculé après
+          value: value
         };
       }
     });
     
-    // Calculer les pourcentages
-    Object.keys(breakdown).forEach(symbol => {
-      breakdown[symbol].percentage = totalValue > 0 
-        ? (breakdown[symbol].value / totalValue * 100) 
-        : 0;
-    });
-    
     res.json({
       status: 'OK',
-      summary: {
-        totalValue: totalValue.toFixed(2),
-        breakdown,
-        lastUpdate: new Date().toISOString()
-      }
+      totalValue: totalValue,
+      breakdown: breakdown,
+      timestamp: new Date().toISOString()
     });
     
   } catch (error) {
     console.error('❌ Error getting portfolio summary:', error);
     res.status(500).json({ 
       error: 'Failed to get portfolio summary',
+      message: error.message 
+    });
+  }
+});
+
+// 📈 GET /api/portfolio/performance - Performance du portfolio
+router.get('/performance', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Pour l'instant, retourner des données fictives
+    res.json({
+      status: 'OK',
+      performance: {
+        dailyChange: 0,
+        weeklyChange: 0,
+        monthlyChange: 0,
+        totalGainLoss: 0
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting portfolio performance:', error);
+    res.status(500).json({ 
+      error: 'Failed to get portfolio performance',
       message: error.message 
     });
   }

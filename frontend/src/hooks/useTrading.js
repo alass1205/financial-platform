@@ -38,7 +38,7 @@ export function useTrading() {
     autoLogin()
   }, [isConnected, account, isLoggedIn])
 
-  // 🔧 CORRECTION - Créer un ordre avec les bonnes données
+  // 🔧 CORRECTION - Créer un ordre avec refresh automatique du portfolio
   const createOrder = useCallback(async (orderData) => {
     if (!isLoggedIn) {
       throw new Error('Vous devez être connecté pour trader')
@@ -50,12 +50,10 @@ export function useTrading() {
     try {
       console.log('🔧 OrderData reçu:', orderData)
       
-      // TRANSFORMATION DES DONNÉES POUR LE BACKEND
-      const [baseToken] = orderData.pair.split('/')
-      
+      // ✅ Le backend attend: { pair, type, quantity, price }
       const backendData = {
-        assetSymbol: baseToken,        // CLV au lieu de CLV/TRG
-        type: orderData.type,          // BUY ou SELL
+        pair: orderData.pair,          // "CLV/TRG", "ROO/TRG", ou "GOV/TRG" 
+        type: orderData.type,          // "BUY" ou "SELL"
         price: orderData.price,        // Numérique
         quantity: orderData.quantity   // Numérique
       }
@@ -64,18 +62,27 @@ export function useTrading() {
       
       const result = await apiService.createOrder(backendData)
       
-      // Recharger les ordres après création
-      await loadOrders()
-      await loadOrderBook(orderData.pair)
+      // 🔄 RECHARGER TOUTES LES DONNÉES APRÈS LE TRADE
+      await Promise.all([
+        loadOrders(),
+        loadOrderBook(orderData.pair),
+        loadTrades()
+      ])
       
+      // 🔄 DÉCLENCHER LE REFRESH DU PORTFOLIO
+      // Utiliser un event custom pour notifier useTokens
+      window.dispatchEvent(new CustomEvent('portfolio-refresh'))
+      
+      console.log('✅ Ordre créé et données rechargées')
       return result
     } catch (error) {
+      console.error('❌ Erreur création ordre:', error)
       setError(error.message)
       throw error
     } finally {
       setIsLoading(false)
     }
-  }, [account, isLoggedIn])
+  }, [isLoggedIn])
 
   // Annuler un ordre
   const cancelOrder = useCallback(async (orderId) => {
@@ -91,6 +98,9 @@ export function useTrading() {
       
       // Recharger les ordres après annulation
       await loadOrders()
+      
+      // Refresh portfolio aussi après annulation
+      window.dispatchEvent(new CustomEvent('portfolio-refresh'))
       
       return result
     } catch (error) {
