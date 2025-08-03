@@ -3,7 +3,6 @@ import { RefreshCw, Wallet, TrendingUp, AlertCircle, Eye, EyeOff } from 'lucide-
 import { useTokens } from '../hooks/useTokens'
 import { useWallet } from '../context/WalletContext'
 import TokenCard from '../components/TokenCard'
-import tokenService from '../services/tokenService'
 
 function Portfolio() {
   const { isConnected, account } = useWallet()
@@ -19,16 +18,6 @@ function Portfolio() {
   } = useTokens()
   
   const [showValues, setShowValues] = useState(true)
-
-  // 🔧 HELPER - Convertir Wei en unités normales pour l'affichage
-  const formatTokenAmount = (balance) => {
-    if (!balance || !balance.formatted) return 0
-    let value = parseFloat(balance.formatted)
-    if (value >= 1000000000000000000) {
-      value = value / Math.pow(10, 18)
-    }
-    return value
-  }
 
   if (!isConnected) {
     return (
@@ -134,8 +123,8 @@ function Portfolio() {
               key="TRG"
               symbol="TRG"
               name="Triangle Coin (Stablecoin)"
-              balance={showValues ? formatTokenAmount(balances.tokens.TRG).toFixed(2) : '••••'}
-              value={showValues ? formatTokenAmount(balances.tokens.TRG).toFixed(2) : '••••'}
+              balance={showValues ? parseFloat(balances.tokens.TRG?.formatted || 0).toFixed(2) : '••••'}
+              value={showValues ? parseFloat(balances.tokens.TRG?.formatted || 0).toFixed(2) : '••••'}
               isLoading={isLoading}
             />
             
@@ -144,8 +133,8 @@ function Portfolio() {
               key="CLV"
               symbol="CLV"
               name="Clove Company (Actions)"
-              balance={showValues ? formatTokenAmount(balances.tokens.CLV).toFixed(0) : '••••'}
-              value={showValues ? (formatTokenAmount(balances.tokens.CLV) * 50).toFixed(2) : '••••'}
+              balance={showValues ? parseFloat(balances.tokens.CLV?.formatted || 0).toFixed(0) : '••••'}
+              value={showValues ? (parseFloat(balances.tokens.CLV?.formatted || 0) * 50).toFixed(2) : '••••'}
               isLoading={isLoading}
             />
             
@@ -154,8 +143,8 @@ function Portfolio() {
               key="ROO"
               symbol="ROO"
               name="Rooibos Limited (Actions)"
-              balance={showValues ? formatTokenAmount(balances.tokens.ROO).toFixed(0) : '••••'}
-              value={showValues ? (formatTokenAmount(balances.tokens.ROO) * 45).toFixed(2) : '••••'}
+              balance={showValues ? parseFloat(balances.tokens.ROO?.formatted || 0).toFixed(0) : '••••'}
+              value={showValues ? (parseFloat(balances.tokens.ROO?.formatted || 0) * 45).toFixed(2) : '••••'}
               isLoading={isLoading}
             />
           </div>

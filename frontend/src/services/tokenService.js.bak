@@ -161,7 +161,8 @@ class TokenService {
     }
   }
 
-  // 🔧 CORRIGÉ - Calculer la valeur totale du portfolio (en TRG)
+  // Calculer la valeur totale du portfolio (en TRG)
+  // Calculer la valeur totale du portfolio (en TRG)
   calculatePortfolioValue(balances) {
     if (!balances || !balances.tokens) return 0
 
@@ -180,7 +181,7 @@ class TokenService {
         // 🔧 CORRECTION: Convertir depuis Wei vers unités normales
         let tokenAmount = parseFloat(balance.formatted)
         
-        // Si le nombre est très grand (>= 1e18), c'est probablement en Wei
+        // Si le nombre est très grand (>= 1e18), c est probablement en Wei
         if (tokenAmount >= 1000000000000000000) {
           tokenAmount = tokenAmount / Math.pow(10, 18)
         }
@@ -201,25 +202,25 @@ class TokenService {
     return totalValue
   }
 
-  // 🔧 NOUVELLE FONCTION pour formater l'affichage
+  // 🔧 NOUVELLE FONCTION pour formater l affichage
   formatBalance(balance, symbol) {
-    if (!balance || !balance.formatted) return '0'
+    if (!balance || !balance.formatted) return "0"
     
     let value = parseFloat(balance.formatted)
     
-    // Si c'est un grand nombre, c'est du Wei - convertir en unités normales
+    // Si c est un grand nombre, c est du Wei - convertir en unités normales
     if (value >= 1000000000000000000) {
       value = value / Math.pow(10, 18)
     }
     
     // Formatage selon le type de token
-    if (symbol === 'TRG') {
-      return value.toLocaleString('fr-FR', { 
+    if (symbol === "TRG") {
+      return value.toLocaleString("fr-FR", { 
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
       })
     } else {
-      return value.toLocaleString('fr-FR', {
+      return value.toLocaleString("fr-FR", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 6
       })
