@@ -1,6 +1,6 @@
 {
   "network": "localhost",
-  "deployTime": "2025-08-03T14:24:16.052Z",
+  "deployTime": "2025-08-03T14:52:41.490Z",
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
   "testUsers": {
     "aya": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
@@ -8,44 +8,44 @@
   },
   "contracts": {
     "TRG": {
-      "address": "0x172076E0166D1F9Cc711C77Adf8488051744980C",
+      "address": "0x3aAde2dCD2Df6a8cAc689EE797591b2913658659",
       "name": "Triangle Coin",
       "symbol": "TRG",
       "totalSupply": "4000",
       "type": "Stablecoin"
     },
     "CLV": {
-      "address": "0x4EE6eCAD1c2Dae9f525404De8555724e3c35d07B",
+      "address": "0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926",
       "name": "Clove Company",
       "symbol": "CLV",
       "totalSupply": "100",
       "type": "Share Token"
     },
     "ROO": {
-      "address": "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25",
+      "address": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
       "name": "Rooibos Limited",
       "symbol": "ROO",
       "totalSupply": "100",
       "type": "Share Token"
     },
     "GOV": {
-      "address": "0xD84379CEae14AA33C123Af12424A37803F885889",
+      "address": "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82",
       "name": "Government Bonds",
       "symbol": "GOV",
       "totalIssued": "20",
       "type": "Bond Token (NFT)"
     },
     "VAULT": {
-      "address": "0x2B0d36FACD61B71CC05ab8F3D2355ec3631C0dd5",
+      "address": "0x457cCf29090fe5A24c19c1bc95F492168C0EaFdb",
       "name": "Platform Vault",
       "type": "Custody Contract",
       "authorizedTokens": [
-        "0x172076E0166D1F9Cc711C77Adf8488051744980C",
-        "0x4EE6eCAD1c2Dae9f525404De8555724e3c35d07B",
-        "0xBEc49fA140aCaA83533fB00A2BB19bDdd0290f25"
+        "0x3aAde2dCD2Df6a8cAc689EE797591b2913658659",
+        "0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926",
+        "0xE3011A37A904aB90C8881a99BD1F6E21401f1522"
       ],
       "authorizedNFTs": [
-        "0xD84379CEae14AA33C123Af12424A37803F885889"
+        "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82"
       ]
     }
   },

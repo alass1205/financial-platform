@@ -27,7 +27,8 @@
     "axios": "^1.11.0",
     "ethers": "^6.15.0",
     "lucide-react": "^0.536.0",
-    "react-router-dom": "^7.7.1"
+    "react-router-dom": "^7.7.1",
+    "recharts": "^3.1.0"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",

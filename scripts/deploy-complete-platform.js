@@ -214,12 +214,14 @@ async function main() {
     let envContent = fs.readFileSync(envPath, 'utf8');
     
     // Remplacer les adresses dans le .env + AJOUTER VAULT
+    // ✅ CORRECTION: Suppression des \` échappés
     envContent = envContent.replace(/TRG_CONTRACT=".*"/, `TRG_CONTRACT="${trgAddress}"`);
     envContent = envContent.replace(/CLV_CONTRACT=".*"/, `CLV_CONTRACT="${clvAddress}"`);
     envContent = envContent.replace(/ROO_CONTRACT=".*"/, `ROO_CONTRACT="${rooAddress}"`);
     envContent = envContent.replace(/GOV_CONTRACT=".*"/, `GOV_CONTRACT="${govAddress}"`);
     
     // Ajouter le Vault si pas déjà présent
+    // ✅ CORRECTION: Suppression des \\ échappés
     if (!envContent.includes('VAULT_CONTRACT')) {
       envContent += `\n# Vault - NOUVEAU\nVAULT_CONTRACT="${vaultAddress}"\n`;
     } else {
@@ -300,15 +302,7 @@ updateContractAddresses();
     console.log("⚠️  Auto-sync partielle:", error.message);
     console.log("💡 Vous devrez peut-être synchroniser manuellement");
   }
-}
-
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error("❌ Erreur:", error);
-    process.exit(1);
-  });
-
+  
   // ============================================================================
   // 🔄 AUTO-UPDATE DES SCRIPTS BACKEND
   // ============================================================================
@@ -354,7 +348,8 @@ async function updateContractAddresses() {
           decimals: symbol === 'GOV' ? 0 : 18
         }
       });
-      console.log(\`✅ \${symbol}: \${address}\`);
+      // ✅ CORRECTION: Suppression des échappements \`
+      console.log('✅ ' + symbol + ': ' + address);
     }
 
     console.log('🏦 Vault Address: ${vaultAddress}');
@@ -379,15 +374,16 @@ updateContractAddresses();
     const envPath = path.join(__dirname, '../backend/.env');
     let envContent = fs.readFileSync(envPath, 'utf8');
     
-    envContent = envContent.replace(/TRG_CONTRACT=".*"/, \`TRG_CONTRACT="${trgAddress}"\`);
-    envContent = envContent.replace(/CLV_CONTRACT=".*"/, \`CLV_CONTRACT="${clvAddress}"\`);
-    envContent = envContent.replace(/ROO_CONTRACT=".*"/, \`ROO_CONTRACT="${rooAddress}"\`);
-    envContent = envContent.replace(/GOV_CONTRACT=".*"/, \`GOV_CONTRACT="${govAddress}"\`);
+    // ✅ CORRECTION: Suppression des \` échappés - utilisation de + pour concaténation
+    envContent = envContent.replace(/TRG_CONTRACT=".*"/, `TRG_CONTRACT="${trgAddress}"`);
+    envContent = envContent.replace(/CLV_CONTRACT=".*"/, `CLV_CONTRACT="${clvAddress}"`);
+    envContent = envContent.replace(/ROO_CONTRACT=".*"/, `ROO_CONTRACT="${rooAddress}"`);
+    envContent = envContent.replace(/GOV_CONTRACT=".*"/, `GOV_CONTRACT="${govAddress}"`);
     
     if (!envContent.includes('VAULT_CONTRACT')) {
-      envContent += \`\\n# Vault - NOUVEAU\\nVAULT_CONTRACT="${vaultAddress}"\\n\`;
+      envContent += `\n# Vault - NOUVEAU\nVAULT_CONTRACT="${vaultAddress}"\n`;
     } else {
-      envContent = envContent.replace(/VAULT_CONTRACT=".*"/, \`VAULT_CONTRACT="${vaultAddress}"\`);
+      envContent = envContent.replace(/VAULT_CONTRACT=".*"/, `VAULT_CONTRACT="${vaultAddress}"`);
     }
     
     fs.writeFileSync(envPath, envContent);
@@ -428,3 +424,10 @@ updateContractAddresses();
     console.log("   cd backend/scripts && node update-contract-addresses.js");
   }
 }
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("❌ Erreur:", error);
+    process.exit(1);
+  });

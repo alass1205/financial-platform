@@ -8,20 +8,32 @@ async function updateContractAddresses() {
     
     // Nouvelles adresses du déploiement
     const newAddresses = {
-      'TRG': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
-      'CLV': '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512', 
-      'ROO': '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
-      'GOV': '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9'
+      'TRG': '0x3aAde2dCD2Df6a8cAc689EE797591b2913658659',
+      'CLV': '0xab16A69A5a8c12C732e0DEFF4BE56A70bb64c926', 
+      'ROO': '0xE3011A37A904aB90C8881a99BD1F6E21401f1522',
+      'GOV': '0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82'
     };
 
     for (const [symbol, address] of Object.entries(newAddresses)) {
-      await prisma.asset.update({
+      await prisma.asset.upsert({
         where: { symbol },
-        data: { contractAddress: address }
+        update: { contractAddress: address },
+        create: {
+          symbol,
+          name: symbol === 'TRG' ? 'Triangle Coin' : 
+                symbol === 'CLV' ? 'Clove Company' :
+                symbol === 'ROO' ? 'Rooibos Limited' : 'Government Bonds',
+          contractAddress: address,
+          type: symbol === 'TRG' ? 'STABLECOIN' : 
+                symbol === 'GOV' ? 'BOND' : 'SHARE',
+          decimals: symbol === 'GOV' ? 0 : 18
+        }
       });
-      console.log(`✅ ${symbol}: ${address}`);
+      // ✅ CORRECTION: Suppression des échappements `
+      console.log('✅ ' + symbol + ': ' + address);
     }
 
+    console.log('🏦 Vault Address: 0x457cCf29090fe5A24c19c1bc95F492168C0EaFdb');
     console.log('✅ Contract addresses updated successfully!');
     
   } catch (error) {
