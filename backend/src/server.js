@@ -180,3 +180,24 @@ async function startServer() {
 
 startServer();
 module.exports = app;
+
+// Routes pour les assets - NOUVEAU
+const assetsRoutes = require('./routes/assets');
+app.use('/api/assets', assetsRoutes);
+
+// Routes pour l'historique trading - NOUVEAU
+const tradingHistoryRoutes = require('./routes/trading-history');
+app.use('/api/trading', tradingHistoryRoutes);
+
+console.log('✅ Nouveaux endpoints ajoutés:');
+console.log('   GET /api/assets/:symbol - Infos asset');
+console.log('   GET /api/trading/history/:symbol - Historique prix');
+console.log('   GET /api/trading/price/:symbol - Prix actuel');
+
+// Routes publiques pour trading (sans auth) - NOUVEAU
+const publicTradingRoutes = require('./routes/public-trading');
+app.use('/api/public/trading', publicTradingRoutes);
+
+console.log('✅ Routes publiques ajoutées:');
+console.log('   GET /api/public/trading/history/:symbol');
+console.log('   GET /api/public/trading/price/:symbol');
