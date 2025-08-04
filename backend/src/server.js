@@ -8,6 +8,7 @@ const tradingService = require('./services/tradingService');
 const apiRoutes = require('./routes/apiRoutes');
 const portfolioRoutes = require('./routes/portfolioRoutes');
 const authRoutes = require('./routes/authRoutes');
+const dividendRoutes = require('./routes/dividends');
 const tradingRoutes = require("./routes/tradingRoutes");
 
 const app = express();
@@ -66,6 +67,7 @@ app.get('/api/test-db', async (req, res) => {
 
 // Routes principales
 app.use('/api/auth', authRoutes);
+app.use('/api/dividends', dividendRoutes);
 app.use("/api/trading", tradingRoutes);
 app.use('/api', apiRoutes);
 app.use('/api/portfolio', portfolioRoutes);

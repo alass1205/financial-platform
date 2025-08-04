@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { RefreshCw, Wallet, TrendingUp, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { RefreshCw, Wallet, TrendingUp, AlertCircle, Eye, EyeOff, Gift } from 'lucide-react'
 import { useTokens } from '../hooks/useTokens'
 import { useWallet } from '../context/WalletContext'
 import TokenCard from '../components/TokenCard'
@@ -19,6 +19,34 @@ function Portfolio() {
   } = useTokens()
   
   const [showValues, setShowValues] = useState(true)
+  const [showDividends, setShowDividends] = useState(false)
+  const [dividendsData, setDividendsData] = useState({ CLV: null, ROO: null })
+
+  // Charger les données de dividendes
+  const loadDividendsData = async () => {
+    if (!account) return;
+    
+    try {
+      const clvResponse = await fetch(`/api/dividends/available/CLV/${account}`);
+      const clvData = await clvResponse.json();
+      
+      const rooResponse = await fetch(`/api/dividends/available/ROO/${account}`);  
+      const rooData = await rooResponse.json();
+      
+      setDividendsData({
+        CLV: clvData.success ? clvData.data : null,
+        ROO: rooData.success ? rooData.data : null
+      });
+    } catch (error) {
+      console.error('Error loading dividends:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (showDividends && account) {
+      loadDividendsData();
+    }
+  }, [showDividends, account]);
 
   // 🔧 HELPER - Convertir Wei en unités normales pour l'affichage
   const formatTokenAmount = (balance) => {
@@ -29,6 +57,90 @@ function Portfolio() {
     }
     return value
   }
+
+  // Composant pour afficher les dividendes
+  const DividendsSection = () => (
+    <div className="card">
+      <h3 className="font-bold text-gray-900 mb-4">💎 Mes Dividendes</h3>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Dividendes CLV */}
+        <div className="p-4 bg-blue-50 rounded-lg">
+          <h4 className="font-semibold text-blue-800 mb-2">CLV - Clove Company</h4>
+          {dividendsData.CLV ? (
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm">Mes actions:</span>
+                <span className="font-semibold">{dividendsData.CLV.userBalance} CLV</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Dividendes disponibles:</span>
+                <span className={`font-semibold ${parseFloat(dividendsData.CLV.availableDividends) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {dividendsData.CLV.availableDividends} TRG
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Total distribué:</span>
+                <span className="text-blue-700">{dividendsData.CLV.totalDividendsDistributed} TRG</span>
+              </div>
+              {parseFloat(dividendsData.CLV.availableDividends) > 0 && (
+                <button className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                  🎯 Réclamer {dividendsData.CLV.availableDividends} TRG
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="text-blue-600">Chargement...</p>
+          )}
+        </div>
+
+        {/* Dividendes ROO */}
+        <div className="p-4 bg-green-50 rounded-lg">
+          <h4 className="font-semibold text-green-800 mb-2">ROO - Rooibos Limited</h4>
+          {dividendsData.ROO ? (
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm">Mes actions:</span>
+                <span className="font-semibold">{dividendsData.ROO.userBalance} ROO</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Dividendes disponibles:</span>
+                <span className={`font-semibold ${parseFloat(dividendsData.ROO.availableDividends) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {dividendsData.ROO.availableDividends} TRG
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Total distribué:</span>
+                <span className="text-green-700">{dividendsData.ROO.totalDividendsDistributed} TRG</span>
+              </div>
+              {parseFloat(dividendsData.ROO.availableDividends) > 0 && (
+                <button className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                  🎯 Réclamer {dividendsData.ROO.availableDividends} TRG
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="text-green-600">Chargement...</p>
+          )}
+        </div>
+      </div>
+      
+      <div className="mt-4 flex justify-between items-center">
+        <button
+          onClick={loadDividendsData}
+          className="text-blue-600 hover:text-blue-800 text-sm"
+        >
+          🔄 Actualiser dividendes
+        </button>
+        <button
+          onClick={() => setShowDividends(false)}
+          className="text-gray-500 hover:text-gray-700 text-sm"
+        >
+          ❌ Fermer
+        </button>
+      </div>
+    </div>
+  );
 
   if (!isConnected) {
     return (
@@ -83,6 +195,9 @@ function Portfolio() {
           </div>
         </div>
       )}
+
+      {/* Section Dividendes (si activée) */}
+      {showDividends && <DividendsSection />}
 
       {/* Résumé du Portfolio */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -227,8 +342,11 @@ function Portfolio() {
           <button className="btn-primary">
             📈 Trader mes tokens
           </button>
-          <button className="btn-secondary">
-            💰 Réclamer dividendes
+          <button 
+            className="btn-secondary"
+            onClick={() => setShowDividends(!showDividends)}
+          >
+            💰 {showDividends ? 'Fermer' : 'Réclamer'} dividendes
           </button>
           <button className="btn-secondary">
             📊 Voir analytics
