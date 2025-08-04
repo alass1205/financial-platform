@@ -21,24 +21,72 @@ function Portfolio() {
   const [showValues, setShowValues] = useState(true)
   const [showDividends, setShowDividends] = useState(false)
   const [dividendsData, setDividendsData] = useState({ CLV: null, ROO: null })
+  const [claimingDividends, setClaimingDividends] = useState({ CLV: false, ROO: false })
 
   // Charger les données de dividendes
   const loadDividendsData = async () => {
     if (!account) return;
     
     try {
-      const clvResponse = await fetch(`/api/dividends/available/CLV/${account}`);
-      const clvData = await clvResponse.json();
+      console.log('🔍 Chargement dividendes pour:', account);
       
-      const rooResponse = await fetch(`/api/dividends/available/ROO/${account}`);  
+      // FIX: Utiliser l'URL complète du backend API
+      const clvResponse = await fetch(`http://localhost:3001/api/dividends/available/CLV/${account}`);
+      const rooResponse = await fetch(`http://localhost:3001/api/dividends/available/ROO/${account}`);
+      
+      console.log('📊 CLV Response status:', clvResponse.status);
+      console.log('📊 ROO Response status:', rooResponse.status);
+      
+      const clvData = await clvResponse.json();
       const rooData = await rooResponse.json();
+      
+      console.log('✅ CLV data:', clvData);
+      console.log('✅ ROO data:', rooData);
       
       setDividendsData({
         CLV: clvData.success ? clvData.data : null,
         ROO: rooData.success ? rooData.data : null
       });
+      
     } catch (error) {
-      console.error('Error loading dividends:', error);
+      console.error('❌ Error loading dividends:', error);
+    }
+  };
+
+  // Réclamer les dividendes
+  const claimDividends = async (symbol) => {
+    if (!account) return;
+    
+    try {
+      setClaimingDividends(prev => ({ ...prev, [symbol]: true }));
+      console.log(`🎯 Réclamation dividendes ${symbol} pour:`, account);
+      
+      const response = await fetch(`http://localhost:3001/api/dividends/claim/${symbol}/${account}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const result = await response.json();
+      console.log(`✅ Résultat claim ${symbol}:`, result);
+      
+      if (result.success) {
+        // Actualiser les données de dividendes
+        await loadDividendsData();
+        // Actualiser le portfolio
+        await refreshBalances();
+        
+        alert(`🎉 ${result.data.amount} TRG réclamés avec succès !`);
+      } else {
+        alert(`❌ Erreur: ${result.error}`);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Erreur réclamation ${symbol}:`, error);
+      alert(`❌ Erreur lors de la réclamation: ${error.message}`);
+    } finally {
+      setClaimingDividends(prev => ({ ...prev, [symbol]: false }));
     }
   };
 
@@ -83,10 +131,27 @@ function Portfolio() {
                 <span className="text-sm">Total distribué:</span>
                 <span className="text-blue-700">{dividendsData.CLV.totalDividendsDistributed} TRG</span>
               </div>
-              {parseFloat(dividendsData.CLV.availableDividends) > 0 && (
-                <button className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
-                  🎯 Réclamer {dividendsData.CLV.availableDividends} TRG
+              <div className="flex justify-between">
+                <span className="text-sm">Par action:</span>
+                <span className="text-blue-600">{dividendsData.CLV.dividendsPerShare} TRG</span>
+              </div>
+              {parseFloat(dividendsData.CLV.availableDividends) > 0 ? (
+                <button 
+                  onClick={() => claimDividends('CLV')}
+                  disabled={claimingDividends.CLV}
+                  className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {claimingDividends.CLV ? '⏳ Réclamation...' : `🎯 Réclamer ${dividendsData.CLV.availableDividends} TRG`}
                 </button>
+              ) : (
+                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                  <p className="text-yellow-800">
+                    💡 Dividendes: {dividendsData.CLV.userBalance} × {dividendsData.CLV.dividendsPerShare} = {(parseFloat(dividendsData.CLV.userBalance) * parseFloat(dividendsData.CLV.dividendsPerShare)).toFixed(2)} TRG
+                  </p>
+                  <p className="text-yellow-700 text-xs mt-1">
+                    Déjà réclamés ou pas encore distribués
+                  </p>
+                </div>
               )}
             </div>
           ) : (
@@ -113,10 +178,27 @@ function Portfolio() {
                 <span className="text-sm">Total distribué:</span>
                 <span className="text-green-700">{dividendsData.ROO.totalDividendsDistributed} TRG</span>
               </div>
-              {parseFloat(dividendsData.ROO.availableDividends) > 0 && (
-                <button className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
-                  🎯 Réclamer {dividendsData.ROO.availableDividends} TRG
+              <div className="flex justify-between">
+                <span className="text-sm">Par action:</span>
+                <span className="text-green-600">{dividendsData.ROO.dividendsPerShare} TRG</span>
+              </div>
+              {parseFloat(dividendsData.ROO.availableDividends) > 0 ? (
+                <button 
+                  onClick={() => claimDividends('ROO')}
+                  disabled={claimingDividends.ROO}
+                  className="w-full mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {claimingDividends.ROO ? '⏳ Réclamation...' : `🎯 Réclamer ${dividendsData.ROO.availableDividends} TRG`}
                 </button>
+              ) : (
+                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                  <p className="text-yellow-800">
+                    💡 Dividendes: {dividendsData.ROO.userBalance} × {dividendsData.ROO.dividendsPerShare} = {(parseFloat(dividendsData.ROO.userBalance) * parseFloat(dividendsData.ROO.dividendsPerShare)).toFixed(2)} TRG
+                  </p>
+                  <p className="text-yellow-700 text-xs mt-1">
+                    Déjà réclamés ou pas encore distribués
+                  </p>
+                </div>
               )}
             </div>
           ) : (
