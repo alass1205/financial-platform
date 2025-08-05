@@ -1,192 +1,306 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
-import { LineChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line } from 'recharts';
-import { useWallet } from '../context/WalletContext';
-import { TrendingUp, TrendingDown, Wallet, AlertCircle, CheckCircle, DollarSign } from 'lucide-react';
-import apiService from '../services/apiService';
+import React, { useState, useEffect, useContext } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ArrowUpIcon, ArrowDownIcon, Wallet, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
+import { WalletContext } from '../context/WalletContext';
+import { ethers } from 'ethers';
 
 const AssetPage = () => {
   const { symbol } = useParams();
-  const location = useLocation();
-  const { account, kycCompleted } = useWallet();
+  const navigate = useNavigate();
+  const { account, signer, kycCompleted } = useContext(WalletContext);
   
-  // Extraire le symbol de l'URL si useParams ne fonctionne pas
-  const assetSymbol = symbol || location.pathname.split('/').pop();
-  
+  // États
+  const [assetData, setAssetData] = useState(null);
   const [priceHistory, setPriceHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [userBalance, setUserBalance] = useState(0);
-  const [currentPrice, setCurrentPrice] = useState(0);
+  const [currentPrice, setCurrentPrice] = useState(10);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   
-  // États pour les formulaires de trading
-  const [buyForm, setBuyForm] = useState({ quantity: '', price: '', type: 'market' });
+  // États pour les formulaires
   const [sellForm, setSellForm] = useState({ quantity: '', price: '', type: 'market' });
+  const [buyForm, setBuyForm] = useState({ quantity: '', price: '', type: 'market' });
+  
+  // États pour blockchain
   const [isTrading, setIsTrading] = useState(false);
   const [notification, setNotification] = useState(null);
-  const [authToken, setAuthToken] = useState(null);
-
-  // Prix par défaut selon le cahier des charges
-  const defaultPrices = {
-    'CLV': 10,
-    'ROO': 10, 
-    'GOV': 200
+  
+  // 🆕 CONFIGURATION BLOCKCHAIN RÉELLE
+  const BLOCKCHAIN_RPC = 'http://127.0.0.1:8546';
+  const VAULT_ADDRESS = '0x1c85638e118b37167e9298c2268758e058DdfDA0';
+  const CONTRACT_ADDRESSES = {
+    'CLV': '0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d',
+    'ROO': '0x46b142DD1E924FAb83eCc3c08e4D46E82f005e0E',  
+    'GOV': '0xC9a43158891282A2B1475592D5719c001986Aaec'
   };
 
-  const assetInfo = {
-    'CLV': { name: 'Clove Company', type: 'Share', description: 'Actions de Clove Company' },
-    'ROO': { name: 'Rooibos Limited', type: 'Share', description: 'Actions de Rooibos Limited' },
-    'GOV': { name: 'Government Bonds', type: 'Bond', description: 'Obligations gouvernementales' }
+  const ERC20_ABI = [
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function decimals() view returns (uint8)",
+    "function balanceOf(address) view returns (uint256)",
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)"
+  ];
+
+  // 🆕 ABI VAULT POUR DEPOSIT
+  const VAULT_ABI = [
+    "function depositToken(address token, uint256 amount) external",
+    "function getUserTokenBalance(address user, address token) view returns (uint256)",
+    "function authorizedTokens(address) view returns (bool)",
+    "event Deposit(address indexed user, address indexed asset, uint256 amount, bool isNFT)"
+  ];
+
+  // Fonction pour afficher notifications
+  const showNotification = (message, type = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 8000);
   };
 
-  // AUTO-AUTHENTIFICATION - CORRIGÉ
+  // Fonction pour vérifier et obtenir token d'authentification
   const ensureAuthentication = async () => {
-    if (!account) return null;
-
-    let token = localStorage.getItem('auth_token');
-    
-    if (!token) {
+    const token = localStorage.getItem('authToken');
+    if (!token && account) {
       try {
-        console.log('🔑 Auto-login pour trading...');
-        
-        const loginResponse = await fetch('http://localhost:3001/api/auth/login', {
+        const response = await fetch('http://localhost:3001/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: account })
         });
         
-        const loginResult = await loginResponse.json();
-        
-        if (loginResult.status === 'OK' && loginResult.token) {
-          token = loginResult.token;
-          localStorage.setItem('auth_token', token);
-          setAuthToken(token);
-          console.log('✅ Auto-login réussi');
-        } else {
-          console.log('❌ Échec auto-login:', loginResult.error);
-          return null;
+        if (response.ok) {
+          const data = await response.json();
+          localStorage.setItem('authToken', data.token);
+          return data.token;
         }
       } catch (error) {
-        console.error('❌ Erreur auto-login:', error);
-        return null;
+        console.error('Auto-login failed:', error);
       }
-    } else {
-      setAuthToken(token);
     }
-    
     return token;
   };
 
-  useEffect(() => {
-    if (assetSymbol) {
-      loadAssetData();
-    }
-  }, [assetSymbol]);
-
-  useEffect(() => {
-    if (account && kycCompleted) {
-      loadUserBalance();
-      ensureAuthentication();
-    }
-  }, [account, kycCompleted, assetSymbol]);
-
-  const loadAssetData = async () => {
+  // 🆕 FONCTION - Créer provider local
+  const getProvider = () => {
     try {
-      setLoading(true);
+      return new ethers.JsonRpcProvider(BLOCKCHAIN_RPC);
+    } catch (error) {
+      console.error('Error creating provider:', error);
+      return null;
+    }
+  };
+
+  // 🆕 FONCTION - Vérifier si contrat existe
+  const checkContractExists = async (address) => {
+    try {
+      const provider = getProvider();
+      if (!provider) return false;
       
-      // Charger l'historique des prix
-      const historyResponse = await fetch(`http://localhost:3001/api/public/trading/history/${assetSymbol}`);
-      const historyData = await historyResponse.json();
+      const code = await provider.getCode(address);
+      return code !== '0x';
+    } catch (error) {
+      console.error('Error checking contract:', error);
+      return false;
+    }
+  };
+
+  // 🆕 FONCTION 1 - Approuver tokens vers Vault
+  const approveToken = async (tokenAddress, amount) => {
+    if (!signer) throw new Error('Wallet non connecté');
+    
+    try {
+      showNotification(`🔍 Vérification du contrat ${symbol}...`, 'info');
       
-      // Charger le prix actuel
-      const priceResponse = await fetch(`http://localhost:3001/api/public/trading/price/${assetSymbol}`);
-      const priceData = await priceResponse.json();
-      
-      if (historyData.success && historyData.data.length > 0) {
-        // Convertir les données pour le graphique
-        const chartData = historyData.data.map((item, index) => ({
-          time: index + 1,
-          price: parseFloat(item.price),
-          volume: parseFloat(item.volume || 0)
-        }));
-        setPriceHistory(chartData);
-      } else {
-        // Données par défaut si pas d'historique
-        const defaultData = [
-          { time: 1, price: defaultPrices[assetSymbol] || 10, volume: 0 },
-          { time: 2, price: defaultPrices[assetSymbol] || 10, volume: 0 },
-          { time: 3, price: defaultPrices[assetSymbol] || 10, volume: 0 }
-        ];
-        setPriceHistory(defaultData);
+      // Vérifier que le contrat existe
+      const contractExists = await checkContractExists(tokenAddress);
+      if (!contractExists) {
+        throw new Error(`Contrat ${symbol} non trouvé à l'adresse ${tokenAddress}`);
       }
       
-      if (priceData.success) {
-        setCurrentPrice(parseFloat(priceData.data.price));
-      } else {
-        setCurrentPrice(defaultPrices[assetSymbol] || 10);
+      showNotification(`✅ Contrat trouvé, approbation ${symbol} en cours...`, 'info');
+      
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+      const amountWei = ethers.parseEther(amount.toString());
+      
+      const tx = await tokenContract.approve(VAULT_ADDRESS, amountWei);
+      
+      showNotification('⏳ Transaction d\'approbation MetaMask envoyée...', 'info');
+      const receipt = await tx.wait();
+      showNotification(`✅ Approbation confirmée ! Block: ${receipt.blockNumber}`, 'success');
+      
+      return receipt;
+    } catch (error) {
+      if (error.code === 'ACTION_REJECTED') {
+        throw new Error('Transaction annulée par l\'utilisateur');
       }
+      throw new Error(`Approbation échouée: ${error.message}`);
+    }
+  };
+
+  // 🆕 FONCTION 2 - Déposer tokens dans Vault (VRAIE TRANSACTION)
+  const depositToVault = async (tokenAddress, amount) => {
+    if (!signer) throw new Error('Wallet non connecté');
+    
+    try {
+      showNotification(`🏦 Dépôt vers Vault: ${amount} ${symbol}...`, 'info');
+      
+      // Vérifier que le vault existe
+      const vaultExists = await checkContractExists(VAULT_ADDRESS);
+      if (!vaultExists) {
+        throw new Error(`Vault contract non trouvé à l'adresse ${VAULT_ADDRESS}`);
+      }
+      
+      const vaultContract = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, signer);
+      const amountWei = ethers.parseEther(amount.toString());
+      
+      console.log(`🔗 Calling vault.depositToken():`);
+      console.log(`   Token: ${tokenAddress}`);
+      console.log(`   Amount: ${amountWei.toString()} wei`);
+      console.log(`   User: ${account}`);
+      
+      // 🆕 VRAIE TRANSACTION BLOCKCHAIN !
+      const tx = await vaultContract.depositToken(tokenAddress, amountWei);
+      
+      showNotification('⏳ Transaction de dépôt MetaMask envoyée...', 'info');
+      const receipt = await tx.wait();
+      
+      showNotification(`✅ Dépôt vault confirmé ! TX: ${receipt.hash.slice(0,10)}...`, 'success');
+      
+      console.log(`✅ REAL vault deposit completed:`);
+      console.log(`   TX Hash: ${receipt.hash}`);
+      console.log(`   Block: ${receipt.blockNumber}`);
+      console.log(`   Gas used: ${receipt.gasUsed.toString()}`);
+      
+      return receipt;
+    } catch (error) {
+      if (error.code === 'ACTION_REJECTED') {
+        throw new Error('Transaction de dépôt annulée par l\'utilisateur');
+      }
+      throw new Error(`Dépôt vault échoué: ${error.message}`);
+    }
+  };
+
+  // Fonction pour vérifier allowance
+  const checkAllowance = async (tokenAddress, amount) => {
+    if (!signer || !account) return false;
+    
+    try {
+      const provider = getProvider();
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+      
+      const allowance = await tokenContract.allowance(account, VAULT_ADDRESS);
+      const requiredAmount = ethers.parseEther(amount.toString());
+      
+      const hasAllowance = allowance >= requiredAmount;
+      
+      console.log(`Allowance check: ${ethers.formatEther(allowance)} vs ${amount} required`);
+      return hasAllowance;
       
     } catch (error) {
-      console.error('Erreur loading asset data:', error);
-      // Prix par défaut en cas d'erreur
-      setPriceHistory([{
-        time: 1,
-        price: defaultPrices[assetSymbol] || 10,
-        volume: 0
-      }]);
-      setCurrentPrice(defaultPrices[assetSymbol] || 10);
-    } finally {
-      setLoading(false);
+      console.error('Error checking allowance:', error);
+      return false;
     }
   };
 
-  // NOUVELLE FONCTION - EXACTEMENT COMME PORTFOLIO
-  const loadUserBalance = async () => {
-    try {
-      console.log(`🔍 Chargement balance ${assetSymbol} pour:`, account);
-      
-      // Utiliser exactement la même méthode que Portfolio
-      const response = await apiService.getPortfolioBalances();
-      
-      if (response.balances && response.balances.tokens) {
-        // Trouver la balance pour cet asset spécifique
-        const assetBalance = response.balances.tokens[assetSymbol];
-        
-        if (assetBalance && assetBalance.formatted) {
-          const balance = parseFloat(assetBalance.formatted);
-          setUserBalance(balance);
-          console.log(`✅ Balance ${assetSymbol} trouvée:`, balance);
-        } else {
-          console.log(`❌ Aucune balance ${assetSymbol} dans tokens:`, response.balances.tokens);
-          setUserBalance(0);
-        }
-      } else {
-        console.log('❌ Réponse portfolio invalide:', response);
-        setUserBalance(0);
-      }
-      
-    } catch (error) {
-      console.error(`❌ Erreur loading balance ${assetSymbol}:`, error);
-      setUserBalance(0);
-    }
-  };
-
-  // Afficher notification temporaire
-  const showNotification = (message, type = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
-
-  // Fonction pour créer un ordre d'achat - CORRIGÉ
-  const handleBuyOrder = async (type = 'market') => {
+  // 🆕 FONCTION PRINCIPALE - handleSellOrder avec 2 transactions blockchain
+  const handleSellOrder = async (type = 'market') => {
     if (!account || !kycCompleted) {
-      showNotification('Veuillez vous connecter et compléter votre KYC', 'error');
+      showNotification('❌ Veuillez vous connecter et compléter votre KYC', 'error');
       return;
     }
 
-    // S'assurer de l'authentification
-    const token = await ensureAuthentication();
-    if (!token) {
-      showNotification('Erreur d\'authentification', 'error');
+    const quantity = parseFloat(sellForm.quantity);
+    const price = type === 'market' ? currentPrice : parseFloat(sellForm.price);
+
+    if (!quantity || quantity <= 0) {
+      showNotification('❌ Veuillez entrer une quantité valide', 'error');
+      return;
+    }
+
+    setIsTrading(true);
+
+    try {
+      const tokenAddress = CONTRACT_ADDRESSES[symbol];
+      if (!tokenAddress) {
+        throw new Error(`Adresse contrat inconnue pour ${symbol}`);
+      }
+
+      showNotification(`🚀 Démarrage ordre BLOCKCHAIN RÉEL: ${quantity} ${symbol} à ${price} TRG`, 'info');
+
+      // 🆕 ÉTAPE 1: Approbation (TRANSACTION 1)
+      showNotification(`📋 Étape 1/4: Vérification des approbations...`, 'info');
+      const hasAllowance = await checkAllowance(tokenAddress, quantity);
+      
+      if (!hasAllowance) {
+        showNotification(`🔐 TRANSACTION 1: Approbation ${quantity} ${symbol}...`, 'info');
+        await approveToken(tokenAddress, quantity);
+      } else {
+        showNotification(`✅ Approbation existante suffisante !`, 'success');
+      }
+
+      // 🆕 ÉTAPE 2: Dépôt vers Vault (TRANSACTION 2)
+      showNotification(`🏦 TRANSACTION 2: Dépôt vers Vault...`, 'info');
+      const depositReceipt = await depositToVault(tokenAddress, quantity);
+
+      // ÉTAPE 3: Créer ordre en DB
+      showNotification(`📝 Étape 3/4: Création de l'ordre...`, 'info');
+      
+      const token = await ensureAuthentication();
+      const orderData = {
+        pair: `${symbol}/TRG`,
+        type: 'SELL',
+        quantity: quantity.toString(),
+        price: price.toString(),
+        vaultTxHash: depositReceipt.hash // Inclure hash de la transaction vault
+      };
+
+      const response = await fetch('http://localhost:3001/api/trading/order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(orderData)
+      });
+
+      const result = await response.json();
+
+      if (result.status === 'OK') {
+        showNotification(`✅ Ordre créé ! ID: ${result.order.id}`, 'success');
+        
+        // ÉTAPE 4: Finalisation
+        showNotification(`🔄 Étape 4/4: Finalisation...`, 'info');
+        
+        setSellForm({ quantity: '', price: '', type: 'market' });
+        await loadAssetData();
+        
+        showNotification(`🎉 ORDRE BLOCKCHAIN RÉEL TERMINÉ ! TX: ${depositReceipt.hash.slice(0,10)}...`, 'success');
+        
+      } else {
+        throw new Error(result.error || 'Échec création ordre');
+      }
+
+    } catch (error) {
+      console.error('❌ Erreur ordre blockchain:', error);
+      
+      if (error.message.includes('annulée')) {
+        showNotification('❌ Transaction annulée par l\'utilisateur', 'error');
+      } else if (error.message.includes('contrat')) {
+        showNotification(`❌ Problème contrat: ${error.message}`, 'error');
+      } else {
+        showNotification(`❌ Erreur: ${error.message}`, 'error');
+      }
+      
+    } finally {
+      setIsTrading(false);
+    }
+  };
+
+  // Fonction handleBuyOrder (simplifiée)
+  const handleBuyOrder = async (type = 'market') => {
+    if (!account || !kycCompleted) {
+      showNotification('❌ Veuillez vous connecter et compléter votre KYC', 'error');
       return;
     }
 
@@ -194,22 +308,18 @@ const AssetPage = () => {
     const price = type === 'market' ? currentPrice : parseFloat(buyForm.price);
 
     if (!quantity || quantity <= 0) {
-      showNotification('Veuillez entrer une quantité valide', 'error');
-      return;
-    }
-
-    if (type === 'limit' && (!price || price <= 0)) {
-      showNotification('Veuillez entrer un prix valide', 'error');
+      showNotification('❌ Veuillez entrer une quantité valide', 'error');
       return;
     }
 
     setIsTrading(true);
 
     try {
-      console.log(`🟢 Création ordre BUY ${assetSymbol}:`, { quantity, price, type });
-
+      showNotification(`🛒 Création ordre d'achat: ${quantity} ${symbol}...`, 'info');
+      
+      const token = await ensureAuthentication();
       const orderData = {
-        pair: `${assetSymbol}/TRG`,
+        pair: `${symbol}/TRG`,
         type: 'BUY',
         quantity: quantity.toString(),
         price: price.toString()
@@ -226,122 +336,91 @@ const AssetPage = () => {
 
       const result = await response.json();
 
-      if (result.status === 'OK' && result.order) {
-        showNotification(`Ordre d'achat créé avec succès ! ID: ${result.order.id}`, 'success');
+      if (result.status === 'OK') {
+        showNotification(`✅ Ordre d'achat créé ! ID: ${result.order.id}`, 'success');
         
-        // Reset formulaire
         setBuyForm({ quantity: '', price: '', type: 'market' });
-        
-        // Recharger les données
         await loadAssetData();
-        await loadUserBalance();
+        
       } else {
-        showNotification(`Erreur: ${result.error || result.message}`, 'error');
+        throw new Error(result.error || 'Échec création ordre d\'achat');
       }
 
     } catch (error) {
-      console.error('Erreur création ordre buy:', error);
-      showNotification('Erreur lors de la création de l\'ordre', 'error');
+      console.error('❌ Erreur ordre d\'achat:', error);
+      showNotification(`❌ Erreur: ${error.message}`, 'error');
+      
     } finally {
       setIsTrading(false);
     }
   };
 
-  // Fonction pour créer un ordre de vente - CORRIGÉ
-  const handleSellOrder = async (type = 'market') => {
-    if (!account || !kycCompleted) {
-      showNotification('Veuillez vous connecter et compléter votre KYC', 'error');
-      return;
-    }
-
-    // S'assurer de l'authentification
-    const token = await ensureAuthentication();
-    if (!token) {
-      showNotification('Erreur d\'authentification', 'error');
-      return;
-    }
-
-    const quantity = parseFloat(sellForm.quantity);
-    const price = type === 'market' ? currentPrice : parseFloat(sellForm.price);
-
-    if (!quantity || quantity <= 0) {
-      showNotification('Veuillez entrer une quantité valide', 'error');
-      return;
-    }
-
-    if (quantity > userBalance) {
-      showNotification(`Solde insuffisant. Vous avez ${userBalance} ${assetSymbol}`, 'error');
-      return;
-    }
-
-    if (type === 'limit' && (!price || price <= 0)) {
-      showNotification('Veuillez entrer un prix valide', 'error');
-      return;
-    }
-
-    setIsTrading(true);
-
+  // Fonction pour charger données asset
+  const loadAssetData = async () => {
     try {
-      console.log(`🔴 Création ordre SELL ${assetSymbol}:`, { quantity, price, type });
-
-      const orderData = {
-        pair: `${assetSymbol}/TRG`,
-        type: 'SELL',
-        quantity: quantity.toString(),
-        price: price.toString()
-      };
-
-      const response = await fetch('http://localhost:3001/api/trading/order', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(orderData)
-      });
-
-      const result = await response.json();
-
-      if (result.status === 'OK' && result.order) {
-        showNotification(`Ordre de vente créé avec succès ! ID: ${result.order.id}`, 'success');
-        
-        // Reset formulaire
-        setSellForm({ quantity: '', price: '', type: 'market' });
-        
-        // Recharger les données
-        await loadAssetData();
-        await loadUserBalance();
-      } else {
-        showNotification(`Erreur: ${result.error || result.message}`, 'error');
+      // Charger infos asset
+      const assetResponse = await fetch(`http://localhost:3001/api/assets/${symbol}`);
+      if (assetResponse.ok) {
+        const assetData = await assetResponse.json();
+        setAssetData(assetData.data);
       }
 
+      // Charger prix actuel  
+      const priceResponse = await fetch(`http://localhost:3001/api/public/trading/price/${symbol}`);
+      if (priceResponse.ok) {
+        const priceData = await priceResponse.json();
+        setCurrentPrice(parseFloat(priceData.data?.price || 10));
+      }
+
+      // Simuler historique des prix
+      const mockHistory = [];
+      const basePrice = currentPrice;
+      for (let i = 0; i < 20; i++) {
+        mockHistory.push({
+          time: new Date(Date.now() - (19-i) * 1800000).toLocaleTimeString(),
+          price: basePrice + (Math.random() - 0.5) * 4
+        });
+      }
+      setPriceHistory(mockHistory);
+
     } catch (error) {
-      console.error('Erreur création ordre sell:', error);
-      showNotification('Erreur lors de la création de l\'ordre', 'error');
-    } finally {
-      setIsTrading(false);
+      console.error('Error loading asset data:', error);
+      setError('Failed to load asset data');
     }
   };
+
+  // useEffect
+  useEffect(() => {
+    if (symbol) {
+      loadAssetData();
+      setLoading(false);
+    }
+  }, [symbol]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Chargement des données {assetSymbol}...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Chargement des données de {symbol}...</p>
         </div>
       </div>
     );
   }
 
-  const currentAsset = assetInfo[assetSymbol];
-
-  if (!currentAsset) {
+  if (error || !assetData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Asset non trouvé</h1>
-          <p className="text-gray-600">L'asset {assetSymbol} n'existe pas.</p>
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Erreur de chargement</h2>
+          <p className="text-gray-600 mb-4">{error || `Asset ${symbol} non trouvé`}</p>
+          <button 
+            onClick={() => navigate('/')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Retour à l'accueil
+          </button>
         </div>
       </div>
     );
@@ -349,226 +428,224 @@ const AssetPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Notification */}
+      {/* Barre de notification */}
       {notification && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
-          notification.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${
+          notification.type === 'success' ? 'bg-green-100 border border-green-400 text-green-700' :
+          notification.type === 'error' ? 'bg-red-100 border border-red-400 text-red-700' :
+          'bg-blue-100 border border-blue-400 text-blue-700'
         }`}>
-          <div className="flex items-center space-x-2">
-            {notification.type === 'success' ? (
-              <CheckCircle className="w-5 h-5" />
-            ) : (
-              <AlertCircle className="w-5 h-5" />
-            )}
-            <span>{notification.message}</span>
+          <div className="flex items-center">
+            {notification.type === 'success' && <CheckCircle className="h-5 w-5 mr-2" />}
+            {notification.type === 'error' && <AlertCircle className="h-5 w-5 mr-2" />}
+            <span className="text-sm font-medium">{notification.message}</span>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                {currentAsset.name} ({assetSymbol})
-              </h1>
-              <p className="text-gray-600 mt-1">{currentAsset.description}</p>
+              <h1 className="text-3xl font-bold text-gray-900">{assetData?.name || `${symbol} Token`}</h1>
+              <p className="text-gray-600">{symbol} • 🔗 Blockchain Trading Réel</p>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-bold text-blue-600">
+              <div className="text-3xl font-bold text-gray-900">
                 {currentPrice} TRG
               </div>
-              <div className="text-sm text-gray-500">Prix actuel</div>
-              {account && kycCompleted && (
-                <div className="text-sm text-green-600 mt-1">
-                  Votre solde: {userBalance} {assetSymbol}
-                </div>
-              )}
+              <div className="flex items-center text-green-600">
+                <TrendingUp className="h-4 w-4 mr-1" />
+                <span className="text-sm">Prix en temps réel</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Contenu principal */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          
-          {/* Graphique à gauche */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">Évolution du prix</h2>
-            <div className="h-96">
+          {/* Graphique (gauche) */}
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Historique des Prix</h2>
+            <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={priceHistory}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="time" 
-                    label={{ value: 'Temps', position: 'insideBottom', offset: -10 }}
-                  />
-                  <YAxis 
-                    label={{ value: 'Prix (TRG)', angle: -90, position: 'insideLeft' }}
-                  />
-                  <Tooltip 
-                    formatter={(value, name) => [
-                      `${value} TRG`, 
-                      name === 'price' ? 'Prix' : 'Volume'
-                    ]}
-                  />
+                  <XAxis dataKey="time" />
+                  <YAxis />
+                  <Tooltip />
                   <Line 
                     type="monotone" 
                     dataKey="price" 
-                    stroke="#2563eb" 
+                    stroke="#3B82F6" 
                     strokeWidth={2}
-                    dot={{ fill: '#2563eb', strokeWidth: 2, r: 4 }}
-                    activeDot={{ r: 6 }}
+                    dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Controls à droite */}
+          {/* Panel trading (droite) */}
           <div className="space-y-6">
-            
-            {/* Trading Section */}
-            {account && kycCompleted ? (
-              <>
-                {/* Formulaire de vente détaillé - AUDIT TEST AYA */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold mb-4 text-red-700">📉 Vendre {assetSymbol} - Test Audit Aya</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Quantité {assetSymbol} (Disponible: {userBalance})
-                      </label>
-                      <input
-                        type="number"
-                        value={sellForm.quantity}
-                        onChange={(e) => setSellForm({ ...sellForm, quantity: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                        placeholder="Ex: 4"
-                        min="0"
-                        max={userBalance}
-                        step="0.01"
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Prix (TRG)
-                      </label>
-                      <input
-                        type="number"
-                        value={sellForm.price}
-                        onChange={(e) => setSellForm({ ...sellForm, price: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                        placeholder="Ex: 9"
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => handleSellOrder('limit')}
-                      disabled={isTrading || !sellForm.quantity || !sellForm.price || userBalance <= 0}
-                      className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors"
-                    >
-                      {isTrading ? 'Création en cours...' : `Vendre ${sellForm.quantity || '0'} ${assetSymbol} à ${sellForm.price || '0'} TRG`}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Formulaire d'achat détaillé - AUDIT TEST BEATRIZ */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold mb-4 text-green-700">📈 Acheter {assetSymbol} - Test Audit Beatriz</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Quantité {assetSymbol}
-                      </label>
-                      <input
-                        type="number"
-                        value={buyForm.quantity}
-                        onChange={(e) => setBuyForm({ ...buyForm, quantity: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                        placeholder="Ex: 10"
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => handleBuyOrder('market')}
-                      disabled={isTrading || !buyForm.quantity}
-                      className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors"
-                    >
-                      {isTrading ? 'Achat en cours...' : `Acheter ${buyForm.quantity || '0'} ${assetSymbol} au marché (${currentPrice} TRG)`}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Actions rapides */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h2 className="text-xl font-semibold mb-4">Trading Rapide</h2>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => handleBuyOrder('market')}
-                      disabled={isTrading}
-                      className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                      <span>{isTrading ? 'Traitement...' : 'Acheter au marché'}</span>
-                    </button>
-                    <button 
-                      onClick={() => handleSellOrder('market')}
-                      disabled={isTrading || userBalance <= 0}
-                      className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <TrendingDown className="w-4 h-4" />
-                      <span>{isTrading ? 'Traitement...' : 'Vendre au marché'}</span>
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              /* Message pour utilisateurs non connectés */
-              <div className="bg-white rounded-lg shadow-md p-6 text-center">
-                <Wallet className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Connexion requise</h3>
-                <p className="text-gray-600 mb-4">
-                  Connectez votre wallet et complétez votre KYC pour trader {assetSymbol}
-                </p>
+            {/* Info balance */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">🔗 Trading Blockchain Réel</h3>
+                <Wallet className="h-5 w-5 text-gray-500" />
               </div>
-            )}
-
-            {/* Info asset */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Informations</h2>
+              
               <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Type:</span>
-                  <span className="font-medium">{currentAsset.type}</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Prix actuel</span>
+                  <span className="font-semibold text-lg">{currentPrice} TRG</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Prix par défaut:</span>
-                  <span className="font-medium">{defaultPrices[assetSymbol]} TRG</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Wallet</span>
+                  <span className="text-green-600">✅ {account?.slice(0,6)}...{account?.slice(-4)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Prix actuel:</span>
-                  <span className="font-medium text-blue-600">{currentPrice} TRG</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Vault</span>
+                  <span className="text-blue-600">🏦 {VAULT_ADDRESS.slice(0,6)}...{VAULT_ADDRESS.slice(-4)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Symbol:</span>
-                  <span className="font-medium">{assetSymbol}</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Mode</span>
+                  <span className="text-purple-600">🔗 Transactions Réelles</span>
                 </div>
-                {authToken && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Auth:</span>
-                    <span className="font-medium text-green-600">✅ Connecté</span>
-                  </div>
-                )}
               </div>
             </div>
+
+            {/* Formulaire Vente */}
+            <div className="bg-white rounded-lg shadow-lg p-6 border-l-4 border-red-500">
+              <h3 className="text-lg font-semibold mb-4 flex items-center">
+                <ArrowDownIcon className="h-5 w-5 mr-2 text-red-500" />
+                Vendre {symbol} (2 Transactions MetaMask)
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="bg-yellow-50 p-3 rounded-lg mb-4">
+                  <p className="text-sm text-yellow-800">
+                    <strong>🔗 Transactions blockchain réelles :</strong><br/>
+                    1️⃣ Approbation {symbol} → Vault<br/>
+                    2️⃣ Dépôt {symbol} dans Vault
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantité {symbol}
+                  </label>
+                  <input
+                    type="number"
+                    value={sellForm.quantity}
+                    onChange={(e) => setSellForm({...sellForm, quantity: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder={`Ex: 4 ${symbol}`}
+                    disabled={isTrading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prix (TRG)
+                  </label>
+                  <input
+                    type="number"
+                    value={sellForm.price}
+                    onChange={(e) => setSellForm({...sellForm, price: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder={`Ex: 9 TRG (actuel: ${currentPrice})`}
+                    disabled={isTrading}
+                  />
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => handleSellOrder('limit')}
+                    disabled={isTrading || !account || !kycCompleted}
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-sm"
+                  >
+                    {isTrading ? '⏳ Processing Blockchain...' : '🔗 VENDRE BLOCKCHAIN'}
+                  </button>
+                  <button
+                    onClick={() => handleSellOrder('market')}
+                    disabled={isTrading || !account || !kycCompleted}
+                    className="flex-1 px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-sm"
+                  >
+                    {isTrading ? '⏳ Processing...' : '⚡ MARCHÉ'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Formulaire Achat */}
+            <div className="bg-white rounded-lg shadow-lg p-6 border-l-4 border-green-500">
+              <h3 className="text-lg font-semibold mb-4 flex items-center">
+                <ArrowUpIcon className="h-5 w-5 mr-2 text-green-500" />
+                Acheter {symbol}
+              </h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantité {symbol}
+                  </label>
+                  <input
+                    type="number"
+                    value={buyForm.quantity}
+                    onChange={(e) => setBuyForm({...buyForm, quantity: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                    placeholder="Quantité à acheter"
+                    disabled={isTrading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prix (TRG)
+                  </label>
+                  <input
+                    type="number"
+                    value={buyForm.price}
+                    onChange={(e) => setBuyForm({...buyForm, price: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                    placeholder={`Prix actuel: ${currentPrice} TRG`}
+                    disabled={isTrading}
+                  />
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => handleBuyOrder('limit')}
+                    disabled={isTrading || !account || !kycCompleted}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
+                  >
+                    {isTrading ? '⏳ Processing...' : '🔗 Acheter'}
+                  </button>
+                  <button
+                    onClick={() => handleBuyOrder('market')}
+                    disabled={isTrading || !account || !kycCompleted}
+                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
+                  >
+                    {isTrading ? '⏳ Processing...' : '⚡ Marché'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Message connexion */}
+            {(!account || !kycCompleted) && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
+                  <div>
+                    <p className="text-sm text-yellow-800">
+                      {!account ? '🔗 Connectez votre wallet pour faire des transactions blockchain' : '📋 Complétez votre KYC pour trader'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

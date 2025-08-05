@@ -2,7 +2,8 @@ import { createContext, useContext, useState, useEffect } from 'react'
 import { useWallet as useWalletHook } from '../hooks/useWallet'
 import KYCModal from '../components/KYCModal'
 
-const WalletContext = createContext()
+// Export du contexte pour utilisation directe
+export const WalletContext = createContext()
 
 export function WalletProvider({ children }) {
   const wallet = useWalletHook()

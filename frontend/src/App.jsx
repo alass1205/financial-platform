@@ -19,13 +19,7 @@ function App() {
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/trading" element={<Trading />} />
             <Route path="/settings" element={<Settings />} />
-            
-            {/* Pages assets individuelles - NOUVEAU */}
-            <Route path="/asset/CLV" element={<AssetPage />} />
-            <Route path="/asset/ROO" element={<AssetPage />} />
-            <Route path="/asset/GOV" element={<AssetPage />} />
-            
-            {/* FAQ */}
+            <Route path="/asset/:symbol" element={<AssetPage />} />
             <Route path="/faq" element={<FAQPage />} />
           </Routes>
         </Layout>
