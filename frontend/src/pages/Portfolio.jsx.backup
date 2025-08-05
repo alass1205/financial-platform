@@ -23,47 +23,6 @@ function Portfolio() {
   const [dividendsData, setDividendsData] = useState({ CLV: null, ROO: null })
   const [claimingDividends, setClaimingDividends] = useState({ CLV: false, ROO: false })
 
-  // Fonction withdraw pour audit Questions 19-21
-  const handleWithdraw = async (symbol) => {
-    if (!account) return;
-    
-    const confirmed = confirm(`Êtes-vous sûr de vouloir withdraw vos ${symbol} ?`);
-    if (!confirmed) return;
-    
-    try {
-      console.log(`🏦 Withdraw ${symbol} pour:`, account);
-      
-      // Mock API withdraw pour audit
-      const response = await fetch(`http://localhost:3001/api/portfolio/withdraw`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("auth_token") || "demo_token"}`
-        },
-        body: JSON.stringify({
-          asset: symbol,
-          address: account
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        alert(`✅ Withdraw ${symbol} réussi ! Transaction: ${result.txHash || "demo"}`);
-      } else {
-        // Pour audit, simuler succès même si API pas encore implémentée
-        alert(`✅ Withdraw ${symbol} simulé avec succès (mode audit)`);
-      }
-      
-      refreshBalances();
-      
-    } catch (error) {
-      console.error(`❌ Erreur withdraw ${symbol}:`, error);
-      // Pour audit, simuler succès même en cas d erreur
-      alert(`✅ Withdraw ${symbol} simulé avec succès (mode audit)`);
-      refreshBalances();
-    }
-  };
-
   // Charger les données de dividendes
   const loadDividendsData = async () => {
     if (!account) return;
@@ -376,7 +335,6 @@ function Portfolio() {
               balance={showValues ? formatTokenAmount(balances.tokens.TRG).toFixed(2) : '••••'}
               value={showValues ? formatTokenAmount(balances.tokens.TRG).toFixed(2) : '••••'}
               isLoading={isLoading}
-              onWithdraw={handleWithdraw}
             />
             
             {/* CLV - Actions Clove */}
@@ -388,7 +346,6 @@ function Portfolio() {
               balance={showValues ? formatTokenAmount(balances.tokens.CLV).toFixed(0) : '••••'}
               value={showValues ? (formatTokenAmount(balances.tokens.CLV) * 50).toFixed(2) : '••••'}
               isLoading={isLoading}
-              onWithdraw={handleWithdraw}
             />
             
             {/* ROO - Actions Rooibos */}
@@ -400,7 +357,6 @@ function Portfolio() {
               balance={showValues ? formatTokenAmount(balances.tokens.ROO).toFixed(0) : '••••'}
               value={showValues ? (formatTokenAmount(balances.tokens.ROO) * 45).toFixed(2) : '••••'}
               isLoading={isLoading}
-              onWithdraw={handleWithdraw}
             />
           </div>
         ) : (
@@ -429,7 +385,6 @@ function Portfolio() {
               value={showValues ? balances.nfts.totalValue.toFixed(2) : '••••'}
               type="nft"
               isLoading={isLoading}
-              onWithdraw={handleWithdraw}
             />
             
             {/* Détails des obligations */}

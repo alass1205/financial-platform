@@ -109,10 +109,16 @@ async function main() {
   console.log("\n📦 CRÉATION DES OBLIGATIONS");
   console.log("─────────────────────────────────────────");
 
-  // Créer 20 obligations GOV
+  // Créer 20 obligations GOV (CORRIGÉ: 4 paramètres)
   console.log("⏳ Émission de 20 obligations...");
   for (let i = 1; i <= 20; i++) {
-    await bondToken.issueBond(deployer.address, ethers.parseEther("200"), 1000); // 10% = 1000 basis points
+    // issueBond(to, principal, interestRate, durationInDays)
+    await bondToken.issueBond(
+      deployer.address, 
+      ethers.parseEther("200"), // 200 TRG principal
+      1000, // 10% interest rate (1000 basis points)
+      365   // 1 year duration (365 days)
+    );
     if (i % 5 === 0) console.log(`📋 ${i}/20 obligations créées`);
   }
   console.log("✅ 20 obligations GOV créées");

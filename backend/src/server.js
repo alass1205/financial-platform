@@ -67,6 +67,7 @@ app.get('/api/test-db', async (req, res) => {
 
 // Routes principales
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', require('./routes/kyc'));
 app.use('/api/dividends', dividendRoutes);
 app.use("/api/trading", tradingRoutes);
 app.use('/api', apiRoutes);

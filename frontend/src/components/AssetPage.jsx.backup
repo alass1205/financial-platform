@@ -51,7 +51,7 @@ const AssetPage = () => {
         const loginResponse = await fetch('http://localhost:3001/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: account })
+          body: JSON.stringify({ address: account }) // CORRIGÉ: address au lieu de walletAddress
         });
         
         const loginResult = await loginResponse.json();
@@ -176,7 +176,7 @@ const AssetPage = () => {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  // Fonction pour créer un ordre d'achat - CORRIGÉ
+  // Fonction pour créer un ordre d'achat
   const handleBuyOrder = async (type = 'market') => {
     if (!account || !kycCompleted) {
       showNotification('Veuillez vous connecter et compléter votre KYC', 'error');
@@ -209,10 +209,11 @@ const AssetPage = () => {
       console.log(`🟢 Création ordre BUY ${assetSymbol}:`, { quantity, price, type });
 
       const orderData = {
-        pair: `${assetSymbol}/TRG`,
+        assetSymbol,
         type: 'BUY',
         quantity: quantity.toString(),
-        price: price.toString()
+        price: price.toString(),
+        orderType: type.toUpperCase()
       };
 
       const response = await fetch('http://localhost:3001/api/trading/order', {
@@ -226,8 +227,8 @@ const AssetPage = () => {
 
       const result = await response.json();
 
-      if (result.status === 'OK' && result.order) {
-        showNotification(`Ordre d'achat créé avec succès ! ID: ${result.order.id}`, 'success');
+      if (result.success) {
+        showNotification(`Ordre d'achat créé avec succès ! ${result.order ? 'ID: ' + result.order.id : ''}`, 'success');
         
         // Reset formulaire
         setBuyForm({ quantity: '', price: '', type: 'market' });
@@ -236,7 +237,7 @@ const AssetPage = () => {
         await loadAssetData();
         await loadUserBalance();
       } else {
-        showNotification(`Erreur: ${result.error || result.message}`, 'error');
+        showNotification(`Erreur: ${result.error}`, 'error');
       }
 
     } catch (error) {
@@ -247,7 +248,7 @@ const AssetPage = () => {
     }
   };
 
-  // Fonction pour créer un ordre de vente - CORRIGÉ
+  // Fonction pour créer un ordre de vente
   const handleSellOrder = async (type = 'market') => {
     if (!account || !kycCompleted) {
       showNotification('Veuillez vous connecter et compléter votre KYC', 'error');
@@ -285,10 +286,11 @@ const AssetPage = () => {
       console.log(`🔴 Création ordre SELL ${assetSymbol}:`, { quantity, price, type });
 
       const orderData = {
-        pair: `${assetSymbol}/TRG`,
+        assetSymbol,
         type: 'SELL',
         quantity: quantity.toString(),
-        price: price.toString()
+        price: price.toString(),
+        orderType: type.toUpperCase()
       };
 
       const response = await fetch('http://localhost:3001/api/trading/order', {
@@ -302,8 +304,8 @@ const AssetPage = () => {
 
       const result = await response.json();
 
-      if (result.status === 'OK' && result.order) {
-        showNotification(`Ordre de vente créé avec succès ! ID: ${result.order.id}`, 'success');
+      if (result.success) {
+        showNotification(`Ordre de vente créé avec succès ! ${result.order ? 'ID: ' + result.order.id : ''}`, 'success');
         
         // Reset formulaire
         setSellForm({ quantity: '', price: '', type: 'market' });
@@ -312,7 +314,7 @@ const AssetPage = () => {
         await loadAssetData();
         await loadUserBalance();
       } else {
-        showNotification(`Erreur: ${result.error || result.message}`, 'error');
+        showNotification(`Erreur: ${result.error}`, 'error');
       }
 
     } catch (error) {
@@ -433,9 +435,32 @@ const AssetPage = () => {
             {/* Trading Section */}
             {account && kycCompleted ? (
               <>
-                {/* Formulaire de vente détaillé - AUDIT TEST AYA */}
+                {/* Actions rapides */}
                 <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold mb-4 text-red-700">📉 Vendre {assetSymbol} - Test Audit Aya</h3>
+                  <h2 className="text-xl font-semibold mb-4">Trading Rapide</h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => handleBuyOrder('market')}
+                      disabled={isTrading}
+                      className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      <span>{isTrading ? 'Traitement...' : 'Acheter au marché'}</span>
+                    </button>
+                    <button 
+                      onClick={() => handleSellOrder('market')}
+                      disabled={isTrading || userBalance <= 0}
+                      className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+                    >
+                      <TrendingDown className="w-4 h-4" />
+                      <span>{isTrading ? 'Traitement...' : 'Vendre au marché'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Formulaire de vente détaillé - AUDIT TEST */}
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4 text-red-700">📉 Vendre {assetSymbol} (Test Audit)</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -478,9 +503,9 @@ const AssetPage = () => {
                   </div>
                 </div>
 
-                {/* Formulaire d'achat détaillé - AUDIT TEST BEATRIZ */}
+                {/* Formulaire d'achat détaillé - AUDIT TEST */}
                 <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold mb-4 text-green-700">📈 Acheter {assetSymbol} - Test Audit Beatriz</h3>
+                  <h3 className="text-lg font-semibold mb-4 text-green-700">📈 Acheter {assetSymbol} (Test Audit)</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -503,29 +528,6 @@ const AssetPage = () => {
                       className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors"
                     >
                       {isTrading ? 'Achat en cours...' : `Acheter ${buyForm.quantity || '0'} ${assetSymbol} au marché (${currentPrice} TRG)`}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Actions rapides */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h2 className="text-xl font-semibold mb-4">Trading Rapide</h2>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => handleBuyOrder('market')}
-                      disabled={isTrading}
-                      className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                      <span>{isTrading ? 'Traitement...' : 'Acheter au marché'}</span>
-                    </button>
-                    <button 
-                      onClick={() => handleSellOrder('market')}
-                      disabled={isTrading || userBalance <= 0}
-                      className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <TrendingDown className="w-4 h-4" />
-                      <span>{isTrading ? 'Traitement...' : 'Vendre au marché'}</span>
                     </button>
                   </div>
                 </div>
