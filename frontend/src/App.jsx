@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Portfolio from './pages/Portfolio'
 import Trading from './pages/Trading'
 import Settings from './pages/Settings'
-import AssetPage from './components/AssetPage'
+import AssetPage from './pages/AssetPage'
 import FAQPage from './components/FAQPage'
 import './index.css'
 

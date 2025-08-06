@@ -9,7 +9,6 @@ const apiRoutes = require('./routes/apiRoutes');
 const portfolioRoutes = require('./routes/portfolioRoutes');
 const authRoutes = require('./routes/authRoutes');
 const dividendRoutes = require('./routes/dividends');
-const tradingRoutes = require("./routes/tradingRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -68,6 +67,7 @@ app.get('/api/test-db', async (req, res) => {
 // Routes principales
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', require('./routes/kyc'));
+const tradingRoutes = require("./routes/tradingRoutes");
 app.use('/api/dividends', dividendRoutes);
 app.use("/api/trading", tradingRoutes);
 app.use('/api', apiRoutes);
@@ -204,3 +204,47 @@ app.use('/api/public/trading', publicTradingRoutes);
 console.log('✅ Routes publiques ajoutées:');
 console.log('   GET /api/public/trading/history/:symbol');
 console.log('   GET /api/public/trading/price/:symbol');
+
+// ✅ NOUVEAU JOUR 16D - Routes Vault/MetaMask Integration
+const vaultRoutes = require('./routes/vaultRoutes');
+const enhancedTradingRoutes = require('./routes/enhancedTradingRoutes');
+
+app.use('/api/trading', vaultRoutes);
+app.use("/api/trading", tradingRoutes);
+
+console.log('🔥 JOUR 16D - ENDPOINTS METAMASK AJOUTÉS:');
+console.log('   GET /api/trading/check-approval/:symbol/:amount');
+console.log('   GET /api/trading/metamask-instructions/:symbol/:amount');
+console.log('   POST /api/trading/wait-deposit');
+console.log('   GET /api/trading/balances');
+console.log('   POST /api/trading/withdraw');
+console.log('   POST /api/trading/order/:symbol');
+
+// ✅ ENDPOINT DYNAMIQUE - Adresses contrats depuis .env
+app.get('/api/contracts', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      contracts: {
+        TRG: process.env.TRG_CONTRACT,
+        CLV: process.env.CLV_CONTRACT,
+        ROO: process.env.ROO_CONTRACT,
+        GOV: process.env.GOV_CONTRACT,
+        VAULT: process.env.VAULT_CONTRACT
+      },
+      network: {
+        rpcUrl: process.env.BLOCKCHAIN_URL,
+        chainId: 31337
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get contract addresses',
+      message: error.message
+    });
+  }
+});
+
+console.log('🔄 DYNAMIC CONTRACT ADDRESSES: GET /api/contracts');

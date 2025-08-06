@@ -1,4 +1,5 @@
 import { ethers } from 'ethers'
+import contractService from './contractService'
 
 // ABIs simplifiés pour nos contrats
 const ERC20_ABI = [
@@ -18,37 +19,50 @@ const ERC721_ABI = [
   "function tokenURI(uint256 tokenId) view returns (string)"
 ]
 
-// Adresses des contrats (déployés automatiquement)
-const CONTRACT_ADDRESSES = {
-  TRG: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  CLV: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", 
-  ROO: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-  GOV: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-}
-
 class TokenService {
   constructor() {
     this.contracts = {}
+    this.contractAddresses = null
   }
 
-  // Initialiser les contrats avec le provider
+  // ✅ NOUVEAU - Initialiser avec adresses dynamiques
   async initializeContracts(provider) {
     try {
       this.provider = provider
       
-      // Initialiser les contrats ERC20
-      this.contracts.TRG = new ethers.Contract(CONTRACT_ADDRESSES.TRG, ERC20_ABI, provider)
-      this.contracts.CLV = new ethers.Contract(CONTRACT_ADDRESSES.CLV, ERC20_ABI, provider)
-      this.contracts.ROO = new ethers.Contract(CONTRACT_ADDRESSES.ROO, ERC20_ABI, provider)
+      // Charger les adresses dynamiquement depuis le backend
+      this.contractAddresses = await contractService.getAllContracts()
+      
+      console.log('🔄 Initializing contracts with dynamic addresses:', this.contractAddresses)
+      
+      // Initialiser les contrats ERC20 avec adresses dynamiques
+      this.contracts.TRG = new ethers.Contract(this.contractAddresses.TRG, ERC20_ABI, provider)
+      this.contracts.CLV = new ethers.Contract(this.contractAddresses.CLV, ERC20_ABI, provider)
+      this.contracts.ROO = new ethers.Contract(this.contractAddresses.ROO, ERC20_ABI, provider)
       
       // Contrat ERC721 pour les obligations
-      this.contracts.GOV = new ethers.Contract(CONTRACT_ADDRESSES.GOV, ERC721_ABI, provider)
+      this.contracts.GOV = new ethers.Contract(this.contractAddresses.GOV, ERC721_ABI, provider)
       
-      console.log('✅ Contrats initialisés avec succès')
+      console.log('✅ Contrats initialisés avec adresses dynamiques')
       return true
     } catch (error) {
       console.error('❌ Erreur initialisation contrats:', error)
-      return false
+      
+      // Fallback vers des adresses par défaut si l'API échoue
+      console.log('⚠️  Using fallback contract addresses')
+      this.contractAddresses = {
+        TRG: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        CLV: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", 
+        ROO: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        GOV: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      }
+      
+      this.contracts.TRG = new ethers.Contract(this.contractAddresses.TRG, ERC20_ABI, provider)
+      this.contracts.CLV = new ethers.Contract(this.contractAddresses.CLV, ERC20_ABI, provider)
+      this.contracts.ROO = new ethers.Contract(this.contractAddresses.ROO, ERC20_ABI, provider)
+      this.contracts.GOV = new ethers.Contract(this.contractAddresses.GOV, ERC721_ABI, provider)
+      
+      return true
     }
   }
 
@@ -70,7 +84,7 @@ class TokenService {
         name,
         decimals: Number(decimals),
         totalSupply: ethers.formatUnits(totalSupply, decimals),
-        address: CONTRACT_ADDRESSES[symbol]
+        address: this.contractAddresses[symbol] // ✅ Utiliser adresse dynamique
       }
     } catch (error) {
       console.error(`Erreur info token ${symbol}:`, error)
@@ -161,11 +175,10 @@ class TokenService {
     }
   }
 
-  // 🔧 CORRIGÉ - Calculer la valeur totale du portfolio (en TRG)
+  // Calculer la valeur totale du portfolio (en TRG)
   calculatePortfolioValue(balances) {
     if (!balances || !balances.tokens) return 0
 
-    // Prix fictifs en TRG
     const prices = {
       TRG: 1,    // 1 TRG = 1 TRG (base)
       CLV: 50,   // 1 CLV = 50 TRG
@@ -174,13 +187,10 @@ class TokenService {
 
     let totalValue = 0
 
-    // Valeur des tokens ERC20
     Object.entries(balances.tokens).forEach(([symbol, balance]) => {
       if (balance && balance.formatted) {
-        // 🔧 CORRECTION: Convertir depuis Wei vers unités normales
         let tokenAmount = parseFloat(balance.formatted)
         
-        // Si le nombre est très grand (>= 1e18), c'est probablement en Wei
         if (tokenAmount >= 1000000000000000000) {
           tokenAmount = tokenAmount / Math.pow(10, 18)
         }
@@ -192,7 +202,6 @@ class TokenService {
       }
     })
 
-    // Valeur des NFT (obligations)
     if (balances.nfts && balances.nfts.totalValue) {
       totalValue += balances.nfts.totalValue
     }
@@ -201,18 +210,16 @@ class TokenService {
     return totalValue
   }
 
-  // 🔧 NOUVELLE FONCTION pour formater l'affichage
+  // Formatage des balances
   formatBalance(balance, symbol) {
     if (!balance || !balance.formatted) return '0'
     
     let value = parseFloat(balance.formatted)
     
-    // Si c'est un grand nombre, c'est du Wei - convertir en unités normales
     if (value >= 1000000000000000000) {
       value = value / Math.pow(10, 18)
     }
     
-    // Formatage selon le type de token
     if (symbol === 'TRG') {
       return value.toLocaleString('fr-FR', { 
         minimumFractionDigits: 2, 

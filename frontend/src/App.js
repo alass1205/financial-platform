@@ -6,7 +6,7 @@ import LoginPage from './components/LoginPage';
 import RegisterPage from './components/RegisterPage';
 import PortfolioPage from './components/PortfolioPage';
 import TradingPage from './components/TradingPage';
-import AssetPage from './components/AssetPage';
+import AssetPage from './pages/AssetPage';
 import FAQPage from './components/FAQPage';
 import { AuthProvider } from './contexts/AuthContext';
 

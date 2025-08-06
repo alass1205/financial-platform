@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ArrowUpIcon, ArrowDownIcon, Wallet, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowUpIcon, ArrowDownIcon, Wallet, TrendingUp, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { WalletContext } from '../context/WalletContext';
 import { ethers } from 'ethers';
 
@@ -13,10 +13,16 @@ const AssetPage = () => {
   // États
   const [assetData, setAssetData] = useState(null);
   const [priceHistory, setPriceHistory] = useState([]);
-  const [userBalance, setUserBalance] = useState(0);
   const [currentPrice, setCurrentPrice] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // ✅ NOUVEAU - États pour les balances
+  const [balances, setBalances] = useState({
+    wallet: {},
+    vault: {}
+  });
+  const [loadingBalances, setLoadingBalances] = useState(false);
   
   // États pour les formulaires
   const [sellForm, setSellForm] = useState({ quantity: '', price: '', type: 'market' });
@@ -26,13 +32,14 @@ const AssetPage = () => {
   const [isTrading, setIsTrading] = useState(false);
   const [notification, setNotification] = useState(null);
   
-  // 🆕 CONFIGURATION BLOCKCHAIN RÉELLE
+  // ADRESSES DYNAMIQUES CORRECTES
   const BLOCKCHAIN_RPC = 'http://127.0.0.1:8546';
-  const VAULT_ADDRESS = '0x1c85638e118b37167e9298c2268758e058DdfDA0';
+  const VAULT_ADDRESS = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
   const CONTRACT_ADDRESSES = {
-    'CLV': '0xfbC22278A96299D91d41C453234d97b4F5Eb9B2d',
-    'ROO': '0x46b142DD1E924FAb83eCc3c08e4D46E82f005e0E',  
-    'GOV': '0xC9a43158891282A2B1475592D5719c001986Aaec'
+    'CLV': '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+    'ROO': '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',  
+    'TRG': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+    'GOV': '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9'
   };
 
   const ERC20_ABI = [
@@ -44,7 +51,6 @@ const AssetPage = () => {
     "function approve(address spender, uint256 amount) returns (bool)"
   ];
 
-  // 🆕 ABI VAULT POUR DEPOSIT
   const VAULT_ABI = [
     "function depositToken(address token, uint256 amount) external",
     "function getUserTokenBalance(address user, address token) view returns (uint256)",
@@ -56,6 +62,57 @@ const AssetPage = () => {
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 8000);
+  };
+
+  // ✅ NOUVEAU - Charger les balances utilisateur
+  const loadBalances = async () => {
+    if (!account) {
+      console.log('❌ Pas de compte connecté, skip balances');
+      return;
+    }
+
+    setLoadingBalances(true);
+    
+    try {
+      console.log('🔄 Chargement balances pour:', account);
+      
+      // Obtenir le token d'auth
+      const token = await ensureAuthentication();
+      if (!token) {
+        console.log('❌ Pas de token, skip balances');
+        return;
+      }
+
+      // Appeler l'API balances
+      const response = await fetch('http://localhost:3001/api/trading/balances', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        console.log('✅ Balances API response:', data);
+        
+        // Stocker les balances
+        setBalances({
+          wallet: data.walletBalances || {},
+          vault: data.vaultBalances || {}
+        });
+        
+        console.log('💰 Balances pour', symbol, ':', {
+          wallet: data.walletBalances?.[symbol]?.formatted || '0',
+          vault: data.vaultBalances?.[symbol]?.formatted || '0'
+        });
+        
+      } else {
+        console.error('❌ Erreur API balances:', response.status);
+      }
+      
+    } catch (error) {
+      console.error('❌ Erreur chargement balances:', error);
+    } finally {
+      setLoadingBalances(false);
+    }
   };
 
   // Fonction pour vérifier et obtenir token d'authentification
@@ -81,7 +138,7 @@ const AssetPage = () => {
     return token;
   };
 
-  // 🆕 FONCTION - Créer provider local
+  // Créer provider local
   const getProvider = () => {
     try {
       return new ethers.JsonRpcProvider(BLOCKCHAIN_RPC);
@@ -91,7 +148,7 @@ const AssetPage = () => {
     }
   };
 
-  // 🆕 FONCTION - Vérifier si contrat existe
+  // Vérifier si contrat existe
   const checkContractExists = async (address) => {
     try {
       const provider = getProvider();
@@ -105,14 +162,13 @@ const AssetPage = () => {
     }
   };
 
-  // 🆕 FONCTION 1 - Approuver tokens vers Vault
+  // FONCTION 1 - Approuver tokens vers Vault
   const approveToken = async (tokenAddress, amount) => {
     if (!signer) throw new Error('Wallet non connecté');
     
     try {
       showNotification(`🔍 Vérification du contrat ${symbol}...`, 'info');
       
-      // Vérifier que le contrat existe
       const contractExists = await checkContractExists(tokenAddress);
       if (!contractExists) {
         throw new Error(`Contrat ${symbol} non trouvé à l'adresse ${tokenAddress}`);
@@ -138,14 +194,13 @@ const AssetPage = () => {
     }
   };
 
-  // 🆕 FONCTION 2 - Déposer tokens dans Vault (VRAIE TRANSACTION)
+  // FONCTION 2 - Déposer tokens dans Vault
   const depositToVault = async (tokenAddress, amount) => {
     if (!signer) throw new Error('Wallet non connecté');
     
     try {
       showNotification(`🏦 Dépôt vers Vault: ${amount} ${symbol}...`, 'info');
       
-      // Vérifier que le vault existe
       const vaultExists = await checkContractExists(VAULT_ADDRESS);
       if (!vaultExists) {
         throw new Error(`Vault contract non trouvé à l'adresse ${VAULT_ADDRESS}`);
@@ -159,7 +214,6 @@ const AssetPage = () => {
       console.log(`   Amount: ${amountWei.toString()} wei`);
       console.log(`   User: ${account}`);
       
-      // 🆕 VRAIE TRANSACTION BLOCKCHAIN !
       const tx = await vaultContract.depositToken(tokenAddress, amountWei);
       
       showNotification('⏳ Transaction de dépôt MetaMask envoyée...', 'info');
@@ -203,7 +257,7 @@ const AssetPage = () => {
     }
   };
 
-  // 🆕 FONCTION PRINCIPALE - handleSellOrder avec 2 transactions blockchain
+  // FONCTION PRINCIPALE - handleSellOrder
   const handleSellOrder = async (type = 'market') => {
     if (!account || !kycCompleted) {
       showNotification('❌ Veuillez vous connecter et compléter votre KYC', 'error');
@@ -228,7 +282,7 @@ const AssetPage = () => {
 
       showNotification(`🚀 Démarrage ordre BLOCKCHAIN RÉEL: ${quantity} ${symbol} à ${price} TRG`, 'info');
 
-      // 🆕 ÉTAPE 1: Approbation (TRANSACTION 1)
+      // ÉTAPE 1: Approbation
       showNotification(`📋 Étape 1/4: Vérification des approbations...`, 'info');
       const hasAllowance = await checkAllowance(tokenAddress, quantity);
       
@@ -239,7 +293,7 @@ const AssetPage = () => {
         showNotification(`✅ Approbation existante suffisante !`, 'success');
       }
 
-      // 🆕 ÉTAPE 2: Dépôt vers Vault (TRANSACTION 2)
+      // ÉTAPE 2: Dépôt vers Vault
       showNotification(`🏦 TRANSACTION 2: Dépôt vers Vault...`, 'info');
       const depositReceipt = await depositToVault(tokenAddress, quantity);
 
@@ -252,7 +306,7 @@ const AssetPage = () => {
         type: 'SELL',
         quantity: quantity.toString(),
         price: price.toString(),
-        vaultTxHash: depositReceipt.hash // Inclure hash de la transaction vault
+        vaultTxHash: depositReceipt.hash
       };
 
       const response = await fetch('http://localhost:3001/api/trading/order', {
@@ -269,11 +323,11 @@ const AssetPage = () => {
       if (result.status === 'OK') {
         showNotification(`✅ Ordre créé ! ID: ${result.order.id}`, 'success');
         
-        // ÉTAPE 4: Finalisation
         showNotification(`🔄 Étape 4/4: Finalisation...`, 'info');
         
         setSellForm({ quantity: '', price: '', type: 'market' });
         await loadAssetData();
+        await loadBalances(); // ✅ RECHARGER LES BALANCES !
         
         showNotification(`🎉 ORDRE BLOCKCHAIN RÉEL TERMINÉ ! TX: ${depositReceipt.hash.slice(0,10)}...`, 'success');
         
@@ -341,6 +395,7 @@ const AssetPage = () => {
         
         setBuyForm({ quantity: '', price: '', type: 'market' });
         await loadAssetData();
+        await loadBalances(); // ✅ RECHARGER LES BALANCES !
         
       } else {
         throw new Error(result.error || 'Échec création ordre d\'achat');
@@ -389,13 +444,19 @@ const AssetPage = () => {
     }
   };
 
-  // useEffect
+  // ✅ useEffect pour charger les balances quand connecté
   useEffect(() => {
     if (symbol) {
       loadAssetData();
       setLoading(false);
     }
   }, [symbol]);
+
+  useEffect(() => {
+    if (account && kycCompleted) {
+      loadBalances();
+    }
+  }, [account, kycCompleted, symbol]);
 
   if (loading) {
     return (
@@ -425,6 +486,10 @@ const AssetPage = () => {
       </div>
     );
   }
+
+  // ✅ CALCUL DES BALANCES À AFFICHER
+  const walletBalance = balances.wallet?.[symbol]?.formatted || '0';
+  const vaultBalance = balances.vault?.[symbol]?.formatted || '0';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -463,6 +528,61 @@ const AssetPage = () => {
           </div>
         </div>
 
+        {/* ✅ NOUVEAU - SECTION BALANCES UTILISATEUR */}
+        {account && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">💰 Vos Balances {symbol}</h2>
+              <button
+                onClick={loadBalances}
+                disabled={loadingBalances}
+                className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingBalances ? 'animate-spin' : ''}`} />
+                <span>Actualiser</span>
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Balance Wallet MetaMask */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-medium text-blue-900">🦊 Wallet MetaMask</h3>
+                  <Wallet className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="text-2xl font-bold text-blue-700">
+                  {walletBalance} {symbol}
+                </div>
+                <p className="text-sm text-blue-600 mt-1">
+                  Disponible pour trading
+                </p>
+              </div>
+
+              {/* Balance Vault Plateforme */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-medium text-green-900">🏦 Vault Plateforme</h3>
+                  <div className="w-5 h-5 bg-green-600 rounded"></div>
+                </div>
+                <div className="text-2xl font-bold text-green-700">
+                  {vaultBalance} {symbol}
+                </div>
+                <p className="text-sm text-green-600 mt-1">
+                  En garantie pour ordres
+                </p>
+              </div>
+            </div>
+
+            {/* Info debug si développement */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="mt-4 p-3 bg-gray-100 rounded text-xs text-gray-600">
+                <strong>Debug:</strong> Wallet: {JSON.stringify(balances.wallet?.[symbol])} | 
+                Vault: {JSON.stringify(balances.vault?.[symbol])}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Graphique (gauche) */}
           <div className="bg-white rounded-lg shadow-lg p-6">
@@ -488,7 +608,7 @@ const AssetPage = () => {
 
           {/* Panel trading (droite) */}
           <div className="space-y-6">
-            {/* Info balance */}
+            {/* Info balance résumé */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold">🔗 Trading Blockchain Réel</h3>
@@ -501,16 +621,18 @@ const AssetPage = () => {
                   <span className="font-semibold text-lg">{currentPrice} TRG</span>
                 </div>
                 <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Disponible</span>
+                  <span className="text-green-600 font-semibold">{walletBalance} {symbol}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">En garantie</span>
+                  <span className="text-blue-600 font-semibold">{vaultBalance} {symbol}</span>
+                </div>
+                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Wallet</span>
-                  <span className="text-green-600">✅ {account?.slice(0,6)}...{account?.slice(-4)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Vault</span>
-                  <span className="text-blue-600">🏦 {VAULT_ADDRESS.slice(0,6)}...{VAULT_ADDRESS.slice(-4)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Mode</span>
-                  <span className="text-purple-600">🔗 Transactions Réelles</span>
+                  <span className="text-gray-500 text-sm">
+                    ✅ {account?.slice(0,6)}...{account?.slice(-4)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -540,9 +662,13 @@ const AssetPage = () => {
                     value={sellForm.quantity}
                     onChange={(e) => setSellForm({...sellForm, quantity: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder={`Ex: 4 ${symbol}`}
+                    placeholder={`Ex: 4 ${symbol} (total: ${(parseFloat(walletBalance) + parseFloat(vaultBalance)).toFixed(1)})`}
                     disabled={isTrading}
+                    max={parseFloat(walletBalance)}
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    💰 Total disponible: {(parseFloat(walletBalance) + parseFloat(vaultBalance)).toFixed(1)} {symbol}
+                  </p>
                 </div>
 
                 <div>
@@ -562,95 +688,96 @@ const AssetPage = () => {
                 <div className="flex space-x-3">
                   <button
                     onClick={() => handleSellOrder('limit')}
-                    disabled={isTrading || !account || !kycCompleted}
-                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-sm"
-                  >
-                    {isTrading ? '⏳ Processing Blockchain...' : '🔗 VENDRE BLOCKCHAIN'}
-                  </button>
-                  <button
-                    onClick={() => handleSellOrder('market')}
-                    disabled={isTrading || !account || !kycCompleted}
-                    className="flex-1 px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-sm"
-                  >
-                    {isTrading ? '⏳ Processing...' : '⚡ MARCHÉ'}
-                  </button>
-                </div>
-              </div>
-            </div>
+                    disabled={isTrading || !account || !kycCompleted || (parseFloat(walletBalance) + parseFloat(vaultBalance)) <= 0}
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 disable
+d:cursor-not-allowed font-semibold text-sm"
+                 >
+                   {isTrading ? '⏳ Processing Blockchain...' : '🔗 VENDRE BLOCKCHAIN'}
+                 </button>
+                 <button
+                   onClick={() => handleSellOrder('market')}
+                   disabled={isTrading || !account || !kycCompleted || (parseFloat(walletBalance) + parseFloat(vaultBalance)) <= 0}
+                   className="flex-1 px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-sm"
+                 >
+                   {isTrading ? '⏳ Processing...' : '⚡ MARCHÉ'}
+                 </button>
+               </div>
+             </div>
+           </div>
 
-            {/* Formulaire Achat */}
-            <div className="bg-white rounded-lg shadow-lg p-6 border-l-4 border-green-500">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <ArrowUpIcon className="h-5 w-5 mr-2 text-green-500" />
-                Acheter {symbol}
-              </h3>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Quantité {symbol}
-                  </label>
-                  <input
-                    type="number"
-                    value={buyForm.quantity}
-                    onChange={(e) => setBuyForm({...buyForm, quantity: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                    placeholder="Quantité à acheter"
-                    disabled={isTrading}
-                  />
-                </div>
+           {/* Formulaire Achat */}
+           <div className="bg-white rounded-lg shadow-lg p-6 border-l-4 border-green-500">
+             <h3 className="text-lg font-semibold mb-4 flex items-center">
+               <ArrowUpIcon className="h-5 w-5 mr-2 text-green-500" />
+               Acheter {symbol}
+             </h3>
+             
+             <div className="space-y-4">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                   Quantité {symbol}
+                 </label>
+                 <input
+                   type="number"
+                   value={buyForm.quantity}
+                   onChange={(e) => setBuyForm({...buyForm, quantity: e.target.value})}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                   placeholder="Quantité à acheter"
+                   disabled={isTrading}
+                 />
+               </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Prix (TRG)
-                  </label>
-                  <input
-                    type="number"
-                    value={buyForm.price}
-                    onChange={(e) => setBuyForm({...buyForm, price: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                    placeholder={`Prix actuel: ${currentPrice} TRG`}
-                    disabled={isTrading}
-                  />
-                </div>
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                   Prix (TRG)
+                 </label>
+                 <input
+                   type="number"
+                   value={buyForm.price}
+                   onChange={(e) => setBuyForm({...buyForm, price: e.target.value})}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                   placeholder={`Prix actuel: ${currentPrice} TRG`}
+                   disabled={isTrading}
+                 />
+               </div>
 
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => handleBuyOrder('limit')}
-                    disabled={isTrading || !account || !kycCompleted}
-                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
-                  >
-                    {isTrading ? '⏳ Processing...' : '🔗 Acheter'}
-                  </button>
-                  <button
-                    onClick={() => handleBuyOrder('market')}
-                    disabled={isTrading || !account || !kycCompleted}
-                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
-                  >
-                    {isTrading ? '⏳ Processing...' : '⚡ Marché'}
-                  </button>
-                </div>
-              </div>
-            </div>
+               <div className="flex space-x-3">
+                 <button
+                   onClick={() => handleBuyOrder('limit')}
+                   disabled={isTrading || !account || !kycCompleted}
+                   className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
+                 >
+                   {isTrading ? '⏳ Processing...' : '🔗 Acheter'}
+                 </button>
+                 <button
+                   onClick={() => handleBuyOrder('market')}
+                   disabled={isTrading || !account || !kycCompleted}
+                   className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
+                 >
+                   {isTrading ? '⏳ Processing...' : '⚡ Marché'}
+                 </button>
+               </div>
+             </div>
+           </div>
 
-            {/* Message connexion */}
-            {(!account || !kycCompleted) && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex items-center">
-                  <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
-                  <div>
-                    <p className="text-sm text-yellow-800">
-                      {!account ? '🔗 Connectez votre wallet pour faire des transactions blockchain' : '📋 Complétez votre KYC pour trader'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+           {/* Message connexion */}
+           {(!account || !kycCompleted) && (
+             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+               <div className="flex items-center">
+                 <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
+                 <div>
+                   <p className="text-sm text-yellow-800">
+                     {!account ? '🔗 Connectez votre wallet pour voir vos balances et trader' : '📋 Complétez votre KYC pour trader'}
+                   </p>
+                 </div>
+               </div>
+             </div>
+           )}
+         </div>
+       </div>
+     </div>
+   </div>
+ );
 };
 
 export default AssetPage;

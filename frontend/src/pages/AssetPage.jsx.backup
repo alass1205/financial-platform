@@ -1,0 +1,624 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ArrowUp, ArrowDown, TrendingUp } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
+import { ethers } from 'ethers';
+import contractService from '../services/contractService';
+
+const AssetPage = () => {
+  const { symbol } = useParams();
+  const navigate = useNavigate();
+  const { account, connectWallet } = useWallet();
+  
+  // États existants
+  const [asset, setAsset] = useState(null);
+  const [priceHistory, setPriceHistory] = useState([]);
+  const [currentPrice, setCurrentPrice] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [balances, setBalances] = useState({ wallet: {}, vault: {} });
+  
+  // États trading
+  const [orderType, setOrderType] = useState('BUY');
+  const [quantity, setQuantity] = useState('');
+  const [price, setPrice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [tradeStatus, setTradeStatus] = useState('');
+
+  // États pour adresses dynamiques
+  const [contracts, setContracts] = useState(null);
+  const [networkConfig, setNetworkConfig] = useState(null);
+  const [contractsLoaded, setContractsLoaded] = useState(false);
+
+  // Charger les adresses de contrats au démarrage
+  useEffect(() => {
+    loadContractAddresses();
+  }, []);
+
+  const loadContractAddresses = async () => {
+    try {
+      setTradeStatus('🔄 Loading contract addresses...');
+      
+      const [contractsData, networkData] = await Promise.all([
+        contractService.getAllContracts(),
+        contractService.getNetworkConfig()
+      ]);
+      
+      setContracts(contractsData);
+      setNetworkConfig(networkData);
+      setContractsLoaded(true);
+      
+      console.log('✅ Dynamic contracts loaded:', contractsData);
+      setTradeStatus('✅ Contract addresses loaded');
+      
+    } catch (error) {
+      console.error('❌ Error loading contracts:', error);
+      setTradeStatus('⚠️ Using fallback contract addresses');
+      setContractsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!symbol || !contractsLoaded) return;
+    
+    loadAssetData();
+    loadPriceData();
+    
+    const interval = setInterval(() => {
+      loadPriceData();
+      if (account) loadBalances();
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, [symbol, account, contractsLoaded]);
+
+  // ✅ CORRIGÉ - Fonction loadAssetData robuste
+  const loadAssetData = async () => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/assets/${symbol}`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Vérifier que data.data existe
+        if (data.data) {
+          setAsset(data.data);
+          setCurrentPrice(parseFloat(data.data.currentPrice) || 10); // Prix par défaut
+        } else {
+          // Créer asset par défaut si l'API échoue
+          console.log('⚠️ Asset API response missing, using fallback');
+          setAsset({
+            symbol: symbol.toUpperCase(),
+            name: getAssetName(symbol),
+            currentPrice: '10',
+            contractAddress: contracts?.[symbol.toUpperCase()] || ''
+          });
+          setCurrentPrice(10);
+        }
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error loading asset:', error);
+      
+      // Fallback asset data
+      setAsset({
+        symbol: symbol.toUpperCase(),
+        name: getAssetName(symbol),
+        currentPrice: '10',
+        contractAddress: contracts?.[symbol.toUpperCase()] || ''
+      });
+      setCurrentPrice(10);
+    }
+  };
+
+  // Helper pour obtenir le nom de l'asset
+  const getAssetName = (symbol) => {
+    const names = {
+      'CLV': 'Clove Company',
+      'ROO': 'Rooibos Limited',
+      'GOV': 'Government Bonds',
+      'TRG': 'Triangle Coin'
+    };
+    return names[symbol.toUpperCase()] || `${symbol.toUpperCase()} Token`;
+  };
+
+  const loadPriceData = async () => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/public/trading/history/${symbol}`);
+      if (response.ok) {
+        const data = await response.json();
+        setPriceHistory(data.history || []);
+        if (data.currentPrice) {
+          setCurrentPrice(data.currentPrice);
+        }
+      }
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading price data:', error);
+      setLoading(false);
+    }
+  };
+
+  const loadBalances = async () => {
+    if (!account?.token) return;
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/trading/balances', {
+        headers: { 'Authorization': `Bearer ${account.token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        console.log('🔍 API Balance Response:', data);
+        
+        setBalances({
+          wallet: data.walletBalances || {},
+          vault: data.vaultBalances || {}
+        });
+        
+        console.log('💰 Balances set:', {
+          wallet: data.walletBalances,
+          vault: data.vaultBalances
+        });
+      }
+    } catch (error) {
+      console.error('Error loading balances:', error);
+    }
+  };
+
+  // Fonction d'approbation avec adresses dynamiques
+  const approveToken = async (amount) => {
+    if (!window.ethereum || !contracts) {
+      throw new Error('MetaMask ou adresses contrats non disponibles');
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      const tokenAddress = contracts[symbol.toUpperCase()];
+      const vaultAddress = contracts.VAULT;
+      
+      if (!tokenAddress || !vaultAddress) {
+        throw new Error(`Adresses contrats non trouvées pour ${symbol}`);
+      }
+
+      console.log(`🔄 Approving ${amount} ${symbol}...`);
+      console.log(`   Token: ${tokenAddress}`);
+      console.log(`   Vault: ${vaultAddress}`);
+
+      const tokenABI = ["function approve(address spender, uint256 amount) returns (bool)"];
+      const tokenContract = new ethers.Contract(tokenAddress, tokenABI, signer);
+      
+      const amountWei = ethers.parseEther(amount.toString());
+      const tx = await tokenContract.approve(vaultAddress, amountWei);
+      
+      setTradeStatus(`⏳ Approbation en cours... TX: ${tx.hash}`);
+      await tx.wait();
+      
+      console.log('✅ Token approval successful');
+      return tx;
+      
+    } catch (error) {
+      console.error('❌ Approval error:', error);
+      throw new Error(`Approbation échouée: ${error.message}`);
+    }
+  };
+
+  // Fonction de dépôt avec adresses dynamiques
+  const depositToVault = async (amount) => {
+    if (!window.ethereum || !contracts) {
+      throw new Error('MetaMask ou adresses contrats non disponibles');
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      const tokenAddress = contracts[symbol.toUpperCase()];
+      const vaultAddress = contracts.VAULT;
+      
+      console.log(`🔄 Depositing ${amount} ${symbol} to vault...`);
+
+      const vaultABI = ["function depositToken(address token, uint256 amount) external"];
+      const vaultContract = new ethers.Contract(vaultAddress, vaultABI, signer);
+      
+      const amountWei = ethers.parseEther(amount.toString());
+      const tx = await vaultContract.depositToken(tokenAddress, amountWei);
+      
+      setTradeStatus(`⏳ Dépôt en cours... TX: ${tx.hash}`);
+      await tx.wait();
+      
+      console.log('✅ Vault deposit successful');
+      return tx;
+      
+    } catch (error) {
+      console.error('❌ Deposit error:', error);
+      throw new Error(`Dépôt vault échoué: ${error.message}`);
+    }
+  };
+
+  // Fonction de vente avec intégration MetaMask
+  const handleSellOrder = async () => {
+    if (!account) {
+      await connectWallet();
+      return;
+    }
+
+    if (!quantity || !price) {
+      setTradeStatus('❌ Veuillez remplir tous les champs');
+      return;
+    }
+
+    if (!contracts) {
+      setTradeStatus('❌ Adresses contrats non chargées');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      setTradeStatus('🔄 Démarrage ordre de vente...');
+
+      // 1. Approbation des tokens
+      await approveToken(quantity);
+      setTradeStatus('✅ Tokens approuvés, dépôt en cours...');
+
+      // 2. Dépôt vers le vault
+      await depositToVault(quantity);
+      setTradeStatus('✅ Tokens déposés, création ordre...');
+
+      // 3. Créer l'ordre via l'API
+      const orderData = {
+        type: 'SELL',
+        quantity: parseFloat(quantity),
+        price: parseFloat(price)
+      };
+
+      const response = await fetch(`http://localhost:3001/api/trading/order/${symbol}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${account.token}`
+        },
+        body: JSON.stringify(orderData)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setTradeStatus(`🎉 Ordre créé avec succès! ID: ${data.order.id}`);
+        
+        setQuantity('');
+        setPrice('');
+        
+        await loadBalances();
+        await loadPriceData();
+      } else {
+        const error = await response.json();
+        setTradeStatus(`❌ Échec ordre: ${error.message}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Erreur ordre blockchain:', error);
+      setTradeStatus(`❌ Erreur: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Fonction d'achat simplifiée
+  const handleBuyOrder = async () => {
+    if (!account) {
+      await connectWallet();
+      return;
+    }
+
+    if (!quantity || !price) {
+      setTradeStatus('❌ Veuillez remplir tous les champs');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const orderData = {
+        type: 'BUY',
+        quantity: parseFloat(quantity),
+        price: parseFloat(price)
+      };
+
+      const response = await fetch(`http://localhost:3001/api/trading/order/${symbol}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${account.token}`
+        },
+        body: JSON.stringify(orderData)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setTradeStatus(`✅ Ordre d'achat créé! ID: ${data.order.id}`);
+        setQuantity('');
+        setPrice('');
+        await loadBalances();
+        await loadPriceData();
+      } else {
+        const error = await response.json();
+        setTradeStatus(`❌ Échec ordre: ${error.message}`);
+      }
+
+    } catch (error) {
+      setTradeStatus(`❌ Erreur: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitOrder = async (e) => {
+    e.preventDefault();
+    
+    if (orderType === 'SELL') {
+      await handleSellOrder();
+    } else {
+      await handleBuyOrder();
+    }
+  };
+
+  // Interface de chargement
+  if (loading || !contractsLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">
+            Chargement {contractsLoaded ? `des données ${symbol}` : 'des contrats'}...
+          </p>
+          {contracts && (
+            <div className="mt-2 text-xs text-gray-500">
+              Contrats chargés dynamiquement ✅
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!asset) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900">Asset non trouvé</h1>
+          <button 
+            onClick={() => navigate('/')}
+            className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          >
+            Retour à l'accueil
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const walletBalance = balances.wallet[symbol]?.formatted || '0';
+  const vaultBalance = balances.vault[symbol]?.formatted || '0';
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">{asset.name}</h1>
+            <p className="text-gray-600">Symbole: {symbol}</p>
+            {contracts && (
+              <p className="text-xs text-green-600">
+                Contrat: {contracts[symbol.toUpperCase()]}
+              </p>
+            )}
+          </div>
+          
+          <div className="text-right">
+            <div className="text-3xl font-bold text-green-600">
+              {currentPrice.toFixed(2)} TRG
+            </div>
+            <div className="flex items-center text-green-600">
+              <TrendingUp className="w-4 h-4 mr-1" />
+              <span className="text-sm">Prix actuel</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Balances utilisateur */}
+        {account && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 className="text-xl font-semibold mb-4">Vos balances</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h3 className="font-medium text-blue-900">Wallet MetaMask</h3>
+                <p className="text-2xl font-bold text-blue-600">{walletBalance} {symbol}</p>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg">
+                <h3 className="font-medium text-green-900">Plateforme (Vault)</h3>
+                <p className="text-2xl font-bold text-green-600">{vaultBalance} {symbol}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Graphique prix */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-semibold mb-4">Historique des prix</h2>
+            
+            {priceHistory.length > 0 ? (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={priceHistory}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="timestamp" 
+                      tickFormatter={(value) => new Date(value).toLocaleDateString()}
+                    />
+                    <YAxis />
+                    <Tooltip 
+                      labelFormatter={(value) => new Date(value).toLocaleString()}
+                      formatter={(value) => [`${value} TRG`, 'Prix']}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="price" 
+                      stroke="#2563eb" 
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-80 flex items-center justify-center bg-gray-50 rounded">
+                <p className="text-gray-500">Aucune donnée de prix disponible</p>
+              </div>
+            )}
+          </div>
+
+          {/* Contrôles de trading */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-semibold mb-6">Trading</h2>
+            
+            {!account ? (
+              <div className="text-center py-8">
+                <p className="text-gray-600 mb-4">Connectez votre wallet pour trader</p>
+                <button
+                  onClick={connectWallet}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  Connecter MetaMask
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitOrder} className="space-y-4">
+                {/* Type d'ordre */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Type d'ordre
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOrderType('BUY')}
+                      className={`p-3 rounded-lg font-medium flex items-center justify-center ${
+                        orderType === 'BUY'
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <ArrowUp className="w-4 h-4 mr-2" />
+                      Acheter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrderType('SELL')}
+                      className={`p-3 rounded-lg font-medium flex items-center justify-center ${
+                        orderType === 'SELL'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <ArrowDown className="w-4 h-4 mr-2" />
+                      Vendre
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quantité */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quantité ({symbol})
+                  </label>
+                  <input
+                    type="number"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    placeholder="0.00"
+                    min="0"
+                    step="0.01"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                  {orderType === 'SELL' && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Disponible: {walletBalance} {symbol} (wallet)
+                    </p>
+                  )}
+                </div>
+
+                {/* Prix */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prix (TRG)
+                  </label>
+                  <input
+                    type="number"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder={currentPrice.toString()}
+                    min="0"
+                    step="0.01"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Prix actuel: {currentPrice} TRG
+                  </p>
+                </div>
+
+                {/* Statut */}
+                {tradeStatus && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-sm text-gray-700">{tradeStatus}</p>
+                  </div>
+                )}
+
+                {/* Adresses contrats (debug) */}
+                {contracts && (
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <p className="text-xs text-blue-800">
+                      🔗 Contrats chargés dynamiquement depuis le backend
+                    </p>
+                  </div>
+                )}
+
+                {/* Bouton de soumission */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !contractsLoaded}
+                  className={`w-full p-3 rounded-lg font-medium ${
+                    isSubmitting || !contractsLoaded
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : orderType === 'BUY'
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                >
+                  {isSubmitting ? (
+                    <span className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Traitement...
+                    </span>
+                  ) : !contractsLoaded ? (
+                    'Chargement contrats...'
+                  ) : (
+                    `${orderType === 'BUY' ? 'Acheter' : 'Vendre'} ${symbol}`
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AssetPage;
